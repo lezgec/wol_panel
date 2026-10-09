@@ -151,11 +151,12 @@ class ApplicationTests(unittest.TestCase):
         response = self.client.get('/api/mobile/v1/devices')
         self.assertEqual(response.status_code, 200)
         self.assertEqual([device['id'] for device in response.json['devices']], [1])
-        self.assertTrue(response.json['devices'][0]['can_wake'])
+        self.assertFalse(response.json['devices'][0]['can_wake'])
+        self.assertIsInstance(response.json['alexa_ready'], bool)
         self.assertTrue(response.json['csrf_token'])
         self.assertEqual(response.headers['Cache-Control'], 'no-store')
 
-    def test_mobile_wake_enforces_csrf_ownership_and_sends_packet(self):
+    def test_mobile_wake_enforces_csrf_ownership_and_coming_soon(self):
         self.login()
         self.assertEqual(self.client.post('/api/mobile/v1/devices/1/wake').status_code, 400)
         headers = {'X-CSRF-Token': self.client.get('/api/mobile/v1/devices').json['csrf_token']}
@@ -163,9 +164,9 @@ class ApplicationTests(unittest.TestCase):
             self.assertEqual(self.client.post('/api/mobile/v1/devices/2/wake', headers=headers).status_code, 404)
             sender.assert_not_called()
             response = self.client.post('/api/mobile/v1/devices/1/wake', headers=headers)
-            self.assertEqual(response.status_code, 200)
-            self.assertTrue(response.json['sent'])
-            sender.assert_called_once_with('AA:BB:CC:DD:EE:FF')
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.json['error'], 'coming_soon')
+            sender.assert_not_called()
 
     def test_mobile_alexa_and_disabled_local_do_not_send_packets(self):
         self.login()
@@ -179,21 +180,66 @@ class ApplicationTests(unittest.TestCase):
             db.execute("UPDATE devices SET wake_method='local' WHERE id=1")
         with patch.dict(self.module.app.config, {'ALLOW_LOCAL_WOL': False}):
             response = self.client.post('/api/mobile/v1/devices/1/wake', headers=headers)
-            self.assertEqual(response.json['error'], 'local_unavailable')
+            self.assertEqual(response.json['error'], 'coming_soon')
 
-    def test_mobile_router_wake_failure_and_rate_limit(self):
+    def test_mobile_router_is_disabled_and_rate_limited(self):
         self.login()
         headers = {'X-CSRF-Token': self.client.get('/api/mobile/v1/devices').json['csrf_token']}
         with self.business_connection() as db:
             db.execute("UPDATE devices SET wake_method='router', wake_host='example.invalid', wake_port=9 WHERE id=1")
         with patch.object(self.module, 'send_router_wol', return_value=False) as sender:
             response = self.client.post('/api/mobile/v1/devices/1/wake', headers=headers)
-            self.assertEqual(response.status_code, 502)
-            sender.assert_called_once_with('AA:BB:CC:DD:EE:FF', 'example.invalid', 9)
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.json['error'], 'coming_soon')
+            sender.assert_not_called()
         with patch.object(self.module, 'rate_allowed', return_value=False):
             response = self.client.post('/api/mobile/v1/devices/1/wake', headers=headers)
             self.assertEqual(response.status_code, 429)
             self.assertIn('Retry-After', response.headers)
+
+    def test_mobile_create_validates_and_always_uses_alexa(self):
+        self.login()
+        headers = {'X-CSRF-Token': self.client.get('/api/mobile/v1/devices').json['csrf_token']}
+        for payload in ({'name': '', 'mac': 'AA:BB:CC:DD:EE:11'}, {'name': 'PC', 'mac': 'bad'},
+                        {'name': 'PC', 'mac': 'AA:BB:CC:DD:EE:11', 'wake_method': 'router'}, [],
+                        {'name': 123, 'mac': 'AA:BB:CC:DD:EE:11'}):
+            response = self.client.post('/api/mobile/v1/devices', json=payload, headers=headers)
+            self.assertEqual(response.status_code, 400)
+        response = self.client.post('/api/mobile/v1/devices', json={'name': ' Nuevo ', 'mac': 'aa-bb-cc-dd-ee-11'}, headers=headers)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual([device['id'] for device in response.json['devices']], [1, 3])
+        with self.business_connection() as db:
+            self.assertEqual(db.execute('SELECT name, mac, user_sub, wake_method FROM devices WHERE id=3').fetchone(),
+                             ('Nuevo', 'AA:BB:CC:DD:EE:11', '1', 'alexa'))
+
+    def test_mobile_edit_enforces_csrf_ownership_and_preserves_settings(self):
+        self.login()
+        headers = {'X-CSRF-Token': self.client.get('/api/mobile/v1/devices').json['csrf_token']}
+        payload = {'name': 'Renombrado', 'mac': 'AA:BB:CC:DD:EE:12'}
+        self.assertEqual(self.client.put('/api/mobile/v1/devices/1', json=payload).status_code, 400)
+        self.assertEqual(self.client.put('/api/mobile/v1/devices/2', json=payload, headers=headers).status_code, 404)
+        with self.business_connection() as db:
+            db.execute("UPDATE devices SET wake_method='router', wake_host='router.example', wake_port=7 WHERE id=1")
+        self.assertEqual(self.client.put('/api/mobile/v1/devices/1', json=payload, headers=headers).status_code, 200)
+        with self.business_connection() as db:
+            self.assertEqual(db.execute('SELECT name, mac, wake_method, wake_host, wake_port FROM devices WHERE id=1').fetchone(),
+                             ('Renombrado', 'AA:BB:CC:DD:EE:12', 'router', 'router.example', 7))
+            self.assertEqual(db.execute('SELECT name FROM devices WHERE id=2').fetchone()[0], 'PC ajena')
+
+    def test_mobile_logout_requires_csrf_and_clears_session(self):
+        self.login()
+        headers = {'X-CSRF-Token': self.client.get('/api/mobile/v1/devices').json['csrf_token']}
+        self.assertEqual(self.client.post('/api/mobile/v1/logout').status_code, 400)
+        self.assertEqual(self.client.post('/api/mobile/v1/logout', headers=headers).status_code, 200)
+        self.assertEqual(self.client.get('/api/mobile/v1/devices').status_code, 401)
+        self.assertEqual(self.client.put('/api/mobile/v1/devices/1', json={}, headers=headers).status_code, 401)
+
+    def test_mobile_writes_are_rate_limited(self):
+        self.login()
+        headers = {'X-CSRF-Token': self.client.get('/api/mobile/v1/devices').json['csrf_token']}
+        with patch.object(self.module, 'rate_allowed', return_value=False):
+            self.assertEqual(self.client.put('/api/mobile/v1/devices/1', json={}, headers=headers).status_code, 429)
+            self.assertEqual(self.client.post('/api/mobile/v1/devices', json={}, headers=headers).status_code, 429)
 
     def test_magic_packet_format_and_destination_without_network(self):
         with patch.object(self.module.socket, 'socket') as socket_factory:

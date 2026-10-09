@@ -29,9 +29,12 @@ Las cuentas y los equipos se guardan en MariaDB. Conserva la carpeta indicada en
 La app [wol-pro-app](https://github.com/lezgec/wol-pro-app) reutiliza el acceso web y muestra equipos en una pantalla nativa. La API versionada usa la sesión Flask existente:
 
 - `GET /api/mobile/v1/devices`: equipos del usuario, correo y token CSRF.
-- `POST /api/mobile/v1/devices/{id}/wake`: requiere sesión y cabecera `X-CSRF-Token`; comprueba propiedad y reutiliza la lógica del panel.
+- `POST /api/mobile/v1/devices`: crea un dispositivo con Alexa, nombre y MAC.
+- `PUT /api/mobile/v1/devices/{id}`: edita nombre y MAC, conservando el método y la configuración existentes.
+- `POST /api/mobile/v1/logout`: cierra la sesión.
+- `POST /api/mobile/v1/devices/{id}/wake`: comprueba propiedad y devuelve instrucciones Alexa o «Próximamente» para encendido directo.
 
-Las respuestas no se almacenan en caché. Las órdenes móviles comparten el límite de solicitudes del panel. Alexa devuelve instrucciones; enviar WoL no confirma que el equipo esté encendido. No se requieren cambios de tablas ni credenciales nuevas.
+Todas las escrituras requieren sesión y cabecera `X-CSRF-Token`; creación y edición tienen límites de solicitudes. Las respuestas no se almacenan en caché. El encendido directo está deshabilitado en el cliente móvil; Alexa devuelve instrucciones. No se requieren cambios de tablas ni credenciales nuevas.
 
 ## Pruebas
 

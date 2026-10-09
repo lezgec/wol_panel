@@ -73,7 +73,8 @@ def rate_allowed(bucket, identity, limit, seconds):
 
 REQUEST_LIMITS = {'login': (15, 60), 'oauth_authorize': (15, 60), 'oauth_token': (120, 60),
                   'register': (5, 900), 'forgot_password': (5, 900), 'wake_device': (12, 60),
-                  'add_device': (30, 60), 'update_device_settings': (30, 60), 'mobile_wake': (12, 60)}
+                  'add_device': (30, 60), 'update_device_settings': (30, 60), 'mobile_wake': (12, 60),
+                  'mobile_create_device': (30, 60), 'mobile_update_device': (30, 60)}
 
 def create_challenge(email, purpose, code):
     challenge_id = secrets.token_urlsafe(32)
@@ -106,14 +107,14 @@ app.jinja_env.globals['csrf_token'] = csrf_token
 def protect_forms():
     if request.path.startswith('/api/mobile/v1/') and 'user_id' not in session:
         return jsonify(error='authentication_required', message='Inicia sesión para continuar.'), 401
-    if request.method == 'POST' and request.endpoint not in ('oauth_token', 'alexa_smarthome'):
+    if (request.method == 'POST' or (request.path.startswith('/api/mobile/v1/') and request.method in ('PUT', 'DELETE'))) and request.endpoint not in ('oauth_token', 'alexa_smarthome'):
         expected = session.get('csrf_token')
         supplied = request.headers.get('X-CSRF-Token', '') if request.path.startswith('/api/mobile/v1/') else request.form.get('csrf_token', '')
         if not expected or not secrets.compare_digest(expected.encode('utf-8'), supplied.encode('utf-8')):
             if request.path.startswith('/api/mobile/v1/'):
                 return jsonify(error='csrf_expired', message='La sesión del formulario expiró. Actualiza tus equipos.'), 400
             return 'El formulario expiró. Recarga la página e inténtalo de nuevo.', 400
-    if request.method == 'POST':
+    if request.method in ('POST', 'PUT', 'DELETE'):
         rule = REQUEST_LIMITS.get(request.endpoint)
         if request.endpoint == 'verify_account' and request.form.get('action') == 'resend':
             rule = (5, 900)
@@ -604,17 +605,66 @@ def mobile_devices():
         return jsonify(error='authentication_required', message='Inicia sesión para ver tus equipos.'), 401
     rows = database.fetch_all('SELECT id, name, mac, wake_method, wake_host, wake_port FROM devices WHERE user_sub = %s ORDER BY id', (str(session['user_id']),))
     devices = [dict(id=row[0], name=row[1], mac=row[2], wake_method=row[3],
-                    can_wake=row[3] == 'router' or (row[3] == 'local' and app.config['ALLOW_LOCAL_WOL'])) for row in rows]
-    return jsonify(version=1, devices=devices, email=session.get('email'), csrf_token=csrf_token())
+                    can_wake=False) for row in rows]
+    return jsonify(version=1, devices=devices, email=session.get('email'),
+                   alexa_ready=alexa_gateway.is_linked(str(session['user_id'])), csrf_token=csrf_token())
+
+
+def mobile_device_fields():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not isinstance(data.get('name'), str) or not isinstance(data.get('mac'), str):
+        raise ValueError('Introduce el nombre y la dirección MAC del dispositivo.')
+    if set(data) - {'name', 'mac'}:
+        raise ValueError('Solo puedes modificar el nombre y la dirección MAC desde la app.')
+    name = data['name'].strip()
+    if not name or len(name) > 100:
+        raise ValueError('Introduce un nombre de entre 1 y 100 caracteres.')
+    return name, normalize_mac(data['mac'])
+
+
+@app.route('/api/mobile/v1/devices', methods=['POST'])
+def mobile_create_device():
+    try:
+        name, mac = mobile_device_fields()
+    except ValueError as error:
+        return jsonify(error='invalid_device', message=str(error)), 400
+    database.execute('INSERT INTO devices (name, mac, user_sub, wake_method, wake_host, wake_port) VALUES (%s, %s, %s, %s, %s, %s)',
+                     (name, mac, str(session['user_id']), 'alexa', '', 9))
+    log_action(session['user_id'], 'ADD_DEVICE', f'Dispositivo añadido desde app: {name} ({mac})')
+    return mobile_devices(), 201
+
+
+@app.route('/api/mobile/v1/devices/<int:device_id>', methods=['PUT'])
+def mobile_update_device(device_id):
+    try:
+        name, mac = mobile_device_fields()
+    except ValueError as error:
+        return jsonify(error='invalid_device', message=str(error)), 400
+    count = database.execute('UPDATE devices SET name=%s, mac=%s WHERE id=%s AND user_sub=%s',
+                             (name, mac, device_id, str(session['user_id'])))
+    if not count:
+        return jsonify(error='device_not_found', message='Dispositivo no encontrado.'), 404
+    log_action(session['user_id'], 'UPDATE_DEVICE', f'Dispositivo actualizado desde app: {name} ({mac})')
+    return mobile_devices()
+
+
+@app.route('/api/mobile/v1/logout', methods=['POST'])
+def mobile_logout():
+    log_action(session['user_id'], 'LOGOUT', 'Cierre de sesión desde app')
+    session.clear()
+    return jsonify(message='Sesión cerrada.')
 
 
 @app.route('/api/mobile/v1/devices/<int:device_id>/wake', methods=['POST'])
 def mobile_wake(device_id):
     if 'user_id' not in session:
         return jsonify(error='authentication_required', message='Inicia sesión para encender tus equipos.'), 401
-    result, status = wake_result(device_id, session['user_id'])
-    result.pop('category')
-    return jsonify(result), status
+    row = database.fetch_one('SELECT name, wake_method FROM devices WHERE id=%s AND user_sub=%s', (device_id, str(session['user_id'])))
+    if not row:
+        return jsonify(error='device_not_found', message='Dispositivo no encontrado.'), 404
+    if row[1] == 'alexa':
+        return jsonify(error='alexa_required', message=f'Di «Alexa, enciende {row[0]}» o usa la app Alexa.'), 409
+    return jsonify(error='coming_soon', message='El encendido directo desde la app estará disponible próximamente.'), 409
 
 
 @app.route('/wake/<int:device_id>', methods=['POST'])
