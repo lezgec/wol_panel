@@ -5,6 +5,11 @@
 !.env.production.example
 instance/
 venv/
+.venv/
 __pycache__/
 *.pyc
 artifacts/
+*.sqlite3
+*.sqlite3-*
+*.pem
+*.key

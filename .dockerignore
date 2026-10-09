@@ -1,9 +1,0 @@
-.env
-.env.*
-!.env.example
-instance
-venv
-__pycache__
-artifacts
-.git
-*.pyc

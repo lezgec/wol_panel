@@ -15,7 +15,8 @@
 | Idioma, región y mercados | Endpoint Lambda y `ALEXA_REGION` |
 | Nombre, descripción, iconos, soporte y cuenta de prueba | Distribución y certificación |
 
-Azure aloja el panel, OAuth, SQL y worker. Lambda es el puente con Alexa; no manda
+Azure aloja el panel Flask/Waitress, MariaDB para cuentas/equipos y SQLite para OAuth/Alexa.
+El servicio systemd inicia también un único worker; consulta [DEPLOY_AZURE.md](DEPLOY_AZURE.md). Lambda es el puente con Alexa; no manda
 UDP a casa. Echo entrega el paquete local para el método Alexa; para Router,
 el backend envía UDP a la IP pública/DDNS y puerto guardados por el propietario.
 
@@ -37,7 +38,7 @@ trigger **Alexa → Alexa Smart Home**, restringido al **Skill ID** de esta skil
 Variables en Lambda:
 
 ```text
-WOL_BACKEND_URL=https://TU_DOMINIO/alexa/smarthome
+WOL_BACKEND_URL=https://wol.luiszamora.dev/alexa/smarthome
 ALEXA_BRIDGE_SECRET=LA_MISMA_CLAVE_PRIVADA_DEL_BACKEND
 ```
 
@@ -51,14 +52,14 @@ Lambda como sustituto del trigger Smart Home.
 | Campo de consola | Valor |
 | --- | --- |
 | Grant type | Authorization Code Grant |
-| Authorization URI | `https://TU_DOMINIO/oauth/authorize` |
-| Access Token URI | `https://TU_DOMINIO/oauth/token` |
+| Authorization URI | `https://wol.luiszamora.dev/oauth/authorize` |
+| Access Token URI | `https://wol.luiszamora.dev/oauth/token` |
 | Client ID | Valor propio de `ALEXA_CLIENT_ID` |
 | Client Secret | Valor propio de `ALEXA_CLIENT_SECRET` |
 | Authentication Scheme | HTTP Basic |
 | Default Access Token Expiration, si aparece | 3600 segundos |
 | Scope | Vacío si es opcional; el backend no exige scopes adicionales |
-| Privacy Policy URL | `https://TU_DOMINIO/privacy` |
+| Privacy Policy URL | `https://wol.luiszamora.dev/privacy` |
 
 Genera ID y secreto privados para el cliente de esta skill; pon los mismos en
 Account Linking y Azure. No son las credenciales del usuario ni las de eventos.
@@ -70,7 +71,8 @@ El backend conserva `state` y admite PKCE S256 cuando se envía.
 
 En **Permissions** activa **Send Alexa Events**. Copia Client ID/Secret de
 Alexa Skill Messaging a `ALEXA_EVENT_CLIENT_ID` y `ALEXA_EVENT_CLIENT_SECRET`
-en Azure. Configura `ALEXA_REGION=NA` para el lanzamiento anterior y reinicia.
+en `/srv/apps/wakeonlan/.env`. Configura `ALEXA_REGION=NA` para el lanzamiento anterior
+y reinicia con `sudo systemctl restart wol.service`.
 El código procesa `AcceptGrant`, guarda permisos por usuario y renueva tokens.
 
 ## 4. Probar con hardware real

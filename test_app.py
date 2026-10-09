@@ -1,4 +1,4 @@
-"""Pruebas aisladas: no usan SQL Server, Amazon, SMTP ni equipos reales."""
+"""Pruebas aisladas; MariaDB real se verifica adicionalmente en test_mariadb.py."""
 import base64
 import hashlib
 import importlib
@@ -8,6 +8,9 @@ import sqlite3
 import tempfile
 import time
 import unittest
+import subprocess
+import sys
+import json
 from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
@@ -21,9 +24,42 @@ class ClosingConnection(sqlite3.Connection):
             self.close()
 
 
+class SQLiteMySQLCursor:
+    """Doble de prueba: execute devuelve un entero, como PyMySQL, no un cursor."""
+    def __init__(self, cursor):
+        self.cursor = cursor
+
+    def execute(self, sql, params=()):
+        self.cursor.execute(sql.replace('%s', '?'), params)
+        return self.cursor.rowcount
+
+    def __getattr__(self, name):
+        return getattr(self.cursor, name)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.cursor.close()
+
+
+class SQLiteMySQLConnection:
+    def __init__(self, connection):
+        self.connection = connection
+
+    def cursor(self):
+        return SQLiteMySQLCursor(self.connection.cursor())
+
+    def __getattr__(self, name):
+        return getattr(self.connection, name)
+
+
 class ApplicationTests(unittest.TestCase):
     def business_connection(self):
         return sqlite3.connect(self.db_path, factory=ClosingConnection)
+
+    def application_connection(self):
+        return SQLiteMySQLConnection(self.business_connection())
     @classmethod
     def setUpClass(cls):
         cls.temp = tempfile.TemporaryDirectory()
@@ -34,7 +70,7 @@ class ApplicationTests(unittest.TestCase):
             'APP_ENV': 'development', 'ALLOW_LOCAL_WOL': '1', 'ALEXA_BRIDGE_SECRET': '',
         })
         cls.environment.start()
-        cls.module = importlib.import_module('app')
+        cls.module = importlib.reload(importlib.import_module('app'))
         cls.module.app.config['TESTING'] = True
 
     @classmethod
@@ -42,8 +78,7 @@ class ApplicationTests(unittest.TestCase):
         cls.environment.stop()
         cls.temp.cleanup()
 
-    def setUp(self):
-        self.db_path = Path(self.temp.name) / 'business.sqlite3'
+    def reset_business(self):
         with self.business_connection() as db:
             db.executescript('''
                 DROP TABLE IF EXISTS users; DROP TABLE IF EXISTS devices; DROP TABLE IF EXISTS audit_logs;
@@ -52,13 +87,24 @@ class ApplicationTests(unittest.TestCase):
                 CREATE TABLE devices (id INTEGER PRIMARY KEY, name TEXT, mac TEXT, user_sub TEXT, wake_method TEXT NOT NULL DEFAULT 'local', wake_host TEXT, wake_port INTEGER NOT NULL DEFAULT 9);
                 CREATE TABLE audit_logs (user_id INTEGER, action TEXT, details TEXT);
             ''')
-            db.execute('INSERT INTO users VALUES (1, ?, ?, NULL, 1, NULL)',
+    def setUp(self):
+        self.db_path = Path(self.temp.name) / 'business.sqlite3'
+        self.reset_business()
+        with self.business_connection() as db:
+            db.execute('INSERT INTO users (id,email,password,amazon_id,is_verified,verification_code) VALUES (1, ?, ?, NULL, 1, NULL)',
                        ('owner@example.invalid', self.module.generate_password_hash('Password1!')))
+            db.execute("INSERT INTO users (id,email,password,is_verified) VALUES (2, 'other@example.invalid', 'unused', 1)")
             db.execute("INSERT INTO devices (id,name,mac,user_sub) VALUES (1, 'PC propia', 'AA:BB:CC:DD:EE:FF', '1')")
             db.execute("INSERT INTO devices (id,name,mac,user_sub) VALUES (2, 'PC ajena', '11:22:33:44:55:66', '2')")
-        self.db_mock = patch.object(self.module, 'get_db_connection', side_effect=lambda: self.business_connection())
+        self.db_mock = patch.object(self.module.database, 'get_db_connection', side_effect=self.application_connection)
         self.db_mock.start()
         self.addCleanup(self.db_mock.stop)
+        self.real_send_wol = self.module.send_wol
+        for target, name in ((self.module, 'send_wol'), (self.module.smtplib, 'SMTP'),
+                             (self.module.requests, 'get'), (self.module.requests, 'post')):
+            guard = patch.object(target, name, side_effect=AssertionError('Una prueba intentó acceder a la red sin mock.'))
+            guard.start()
+            self.addCleanup(guard.stop)
         with self.module.state_connection() as db:
             for table in ('auth_codes', 'auth_tokens', 'challenges', 'alexa_grants', 'alexa_jobs', 'rate_limits'):
                 db.execute('DELETE FROM ' + table)
@@ -99,19 +145,18 @@ class ApplicationTests(unittest.TestCase):
             directive['payload']['scope'] = directive['endpoint'].pop('scope')
         return {'directive': directive}
 
-    def test_actual_udp_packet_on_loopback(self):
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as receiver:
-            receiver.bind(('127.0.0.1', 0))
-            receiver.settimeout(2)
-            with patch.dict(os.environ, {'WOL_BROADCAST': '127.0.0.1', 'WOL_PORT': str(receiver.getsockname()[1])}):
-                self.assertTrue(self.module.send_wol('aa-bb-cc-dd-ee-ff'))
-            packet, _ = receiver.recvfrom(1024)
+    def test_magic_packet_format_and_destination_without_network(self):
+        with patch.object(self.module.socket, 'socket') as socket_factory:
+            sender = socket_factory.return_value.__enter__.return_value
+            self.assertTrue(self.real_send_wol('aa-bb-cc-dd-ee-ff', '127.0.0.1', 9))
+            packet, destination = sender.sendto.call_args.args
+            self.assertEqual(destination, ('127.0.0.1', 9))
         self.assertEqual(packet, b'\xff' * 6 + bytes.fromhex('aabbccddeeff') * 16)
         self.assertEqual(len(packet), 102)
 
     def test_invalid_mac_never_opens_socket(self):
         with patch.object(self.module.socket, 'socket') as send:
-            self.assertFalse(self.module.send_wol('GG:BB:CC:DD:EE:FF'))
+            self.assertFalse(self.real_send_wol('GG:BB:CC:DD:EE:FF'))
             send.assert_not_called()
 
     def test_panel_login_dashboard_and_wake(self):
@@ -326,7 +371,12 @@ class ApplicationTests(unittest.TestCase):
     def test_router_send_resolves_public_destination_and_blocks_private_dns(self):
         self.login()
         self.set_device_method('router', 'casa.example.net', 40009)
-        with patch.object(self.module.socket, 'getaddrinfo', return_value=[(socket.AF_INET, socket.SOCK_DGRAM, 17, '', ('8.8.8.8', 40009))]), patch.object(self.module, 'send_wol', return_value=True) as send:
+        real_lookup = socket.getaddrinfo
+        def lookup(host, port, *args, **kwargs):
+            if host == 'casa.example.net':
+                return [(socket.AF_INET, socket.SOCK_DGRAM, 17, '', ('8.8.8.8', 40009))]
+            return real_lookup(host, port, *args, **kwargs)
+        with patch.object(self.module.socket, 'getaddrinfo', side_effect=lookup), patch.object(self.module, 'send_wol', return_value=True) as send:
             result = self.client.post('/wake/1', data={'csrf_token': self.csrf()}, follow_redirects=True)
             send.assert_called_once_with('AA:BB:CC:DD:EE:FF', '8.8.8.8', 40009)
             self.assertIn(b'Paquete de encendido enviado', result.data)
@@ -464,8 +514,10 @@ class ApplicationTests(unittest.TestCase):
         from flask import Flask
         from production_config import configure
         settings = {'APP_ENV': 'production', 'FLASK_SECRET_KEY': 'f' * 32, 'ALEXA_BRIDGE_SECRET': 'b' * 32,
-                    'DB_CONNECTION_STRING': 'configured', 'PUBLIC_BASE_URL': 'https://wol.example',
+                    'DB_HOST': '127.0.0.1', 'DB_PORT': '3306', 'DB_NAME': 'wol_panel', 'DB_USER': 'wol_user', 'DB_PASSWORD': 'test-only',
+                    'PUBLIC_BASE_URL': 'https://wol.example', 'HOST': '127.0.0.1',
                     'SMTP_USER': 'configured', 'SMTP_PASSWORD': 'configured', 'COOKIE_SECURE': '1',
+                    'SMTP_FROM': 'test@example.invalid',
                     'ALLOW_LOCAL_WOL': '0', 'TRUST_PROXY_COUNT': '0'}
         with patch.dict(os.environ, settings):
             public = Flask('production-test')
@@ -473,7 +525,7 @@ class ApplicationTests(unittest.TestCase):
             self.assertTrue(public.config['SESSION_COOKIE_SECURE'])
             self.assertFalse(public.config['ALLOW_LOCAL_WOL'])
             self.assertEqual(public.test_client().get('/', headers={'Host': 'evil.example'}).status_code, 400)
-            for key, invalid in [('FLASK_SECRET_KEY', ''), ('PUBLIC_BASE_URL', 'http://wol.example'), ('COOKIE_SECURE', '0'), ('ALLOW_LOCAL_WOL', '1')]:
+            for key, invalid in [('FLASK_SECRET_KEY', ''), ('PUBLIC_BASE_URL', 'http://wol.example'), ('COOKIE_SECURE', '0'), ('ALLOW_LOCAL_WOL', '1'), ('HOST', '0.0.0.0')]:
                 with patch.dict(os.environ, {key: invalid}), self.assertRaises(RuntimeError):
                     configure(Flask('invalid-test'))
 
@@ -503,6 +555,56 @@ class ApplicationTests(unittest.TestCase):
             for call in post.call_args_list:
                 self.assertEqual(call.kwargs['headers']['Authorization'], 'Bearer second-gateway-token')
                 self.assertEqual(call.kwargs['json']['event']['endpoint']['endpointId'], '2')
+
+    def test_sqlite_state_and_oauth_refresh_survive_a_new_process(self):
+        token = self.token()
+        self.grant()
+        self.module.alexa_gateway.enqueue('1', '1', 'persist-correlation', 'persist-directive')
+        with self.module.state_connection() as db:
+            refresh = db.execute('SELECT refresh_token FROM auth_tokens WHERE access_token=?', (token,)).fetchone()[0]
+        child_env = dict(os.environ, TEST_REFRESH_TOKEN=refresh)
+        source = '''
+import json, os, app
+with app.state_connection() as db:
+    saved = db.execute("SELECT count(*) FROM alexa_grants").fetchone()[0] == 1
+    queued = db.execute("SELECT count(*) FROM alexa_jobs WHERE status='pending'").fetchone()[0] == 1
+result = app.app.test_client().post('/oauth/token', data=dict(grant_type='refresh_token', refresh_token=os.environ['TEST_REFRESH_TOKEN'], client_id='test-client', client_secret='test-secret'))
+print(json.dumps(dict(grants=saved, jobs=queued, refreshed=result.status_code == 200)))
+'''
+        result = subprocess.run([sys.executable, '-c', source], env=child_env, capture_output=True, text=True, check=True, timeout=20)
+        self.assertEqual(json.loads(result.stdout), {'grants': True, 'jobs': True, 'refreshed': True})
+
+    def test_database_failure_does_not_leak_credentials(self):
+        self.login()
+        with patch.object(self.module.database, 'fetch_all', side_effect=self.module.database.pymysql.OperationalError(1045, 'private-test-password')), self.assertLogs(level='ERROR') as logs:
+            response = self.client.get('/')
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn(b'private-test-password', response.data)
+        self.assertNotIn('private-test-password', ''.join(logs.output))
+
+    def test_repeated_settings_update_still_finds_owned_device(self):
+        self.login()
+        self.set_device_method('alexa')
+        for _ in range(2):
+            response = self.client.post('/devices/1/settings', data={'wake_method': 'alexa', 'csrf_token': self.csrf()}, follow_redirects=True)
+            self.assertIn('Método de encendido guardado.'.encode(), response.data)
+
+    def test_logout_removes_authenticated_session(self):
+        self.login()
+        self.assertEqual(self.client.get('/logout').status_code, 302)
+        with self.client.session_transaction() as session:
+            self.assertNotIn('user_id', session)
+        self.assertEqual(self.client.get('/').location, '/login')
+
+    def test_smtp_uses_verified_sender_and_hides_errors(self):
+        with patch.dict(os.environ, {'SMTP_FROM': 'Soporte <support@example.invalid>'}), patch.object(self.module.smtplib, 'SMTP') as smtp:
+            server = smtp.return_value.__enter__.return_value
+            self.assertTrue(self.module.send_reset_email('user@example.invalid', '123456'))
+            self.assertEqual(server.sendmail.call_args.args[:2], ('support@example.invalid', 'user@example.invalid'))
+            server.sendmail.side_effect = RuntimeError('private-smtp-password')
+            with self.assertLogs(level='WARNING') as logs:
+                self.assertFalse(self.module.send_verification_email('user@example.invalid', '123456'))
+            self.assertNotIn('private-smtp-password', ''.join(logs.output))
 
 
 if __name__ == '__main__':

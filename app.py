@@ -1,5 +1,6 @@
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash
-import pyodbc
+import database
+import logging
 import socket
 import ipaddress
 import os
@@ -16,6 +17,7 @@ import requests
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.utils import parseaddr
 from datetime import datetime, timezone
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
@@ -137,10 +139,6 @@ def normalize_mac(mac):
 from alexa_wol import AlexaGateway
 alexa_gateway = AlexaGateway(state_connection)
 
-# --- CONFIGURACIÓN DE BASE DE DATOS SQL SERVER ---
-DB_SERVER = os.environ.get('DB_SERVER', 'ESCRITORIO')
-DB_DATABASE = os.environ.get('DB_DATABASE', 'wol_panel')
-
 # --- CREDENCIALES OAUTH Y AMAZON ---
 MY_CLIENT_ID = os.environ.get('MY_CLIENT_ID', '')
 MY_CLIENT_SECRET = os.environ.get('MY_CLIENT_SECRET', '')
@@ -151,27 +149,18 @@ SMTP_PORT = int(os.environ.get('SMTP_PORT', '587'))
 SMTP_USER = os.environ.get('SMTP_USER', '')
 SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD', '')
 
-def get_db_connection():
-    if os.environ.get('DB_CONNECTION_STRING'):
-        return pyodbc.connect(os.environ['DB_CONNECTION_STRING'])
-    conn = pyodbc.connect(
-        f'DRIVER={{ODBC Driver 17 for SQL Server}};'
-        f'SERVER={DB_SERVER};'
-        f'DATABASE={DB_DATABASE};'
-        f'Trusted_connection=yes;', timeout=5
-    )
-    return conn
-
 # --- FUNCIÓN DE LOGS DE AUDITORÍA ---
 def log_action(user_id, action, details):
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?, ?, ?)", (user_id, action, details))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        print(f"Error guardando log: {e}")
+        database.execute('INSERT INTO audit_logs (user_id, action, details) VALUES (%s, %s, %s)',
+                         (user_id, action[:100], details[:255]))
+    except database.pymysql.MySQLError:
+        logging.warning('No se pudo guardar la auditoría en MariaDB.')
+
+@app.errorhandler(database.pymysql.MySQLError)
+def database_unavailable(error):
+    logging.error('Falló una operación de MariaDB (%s).', type(error).__name__)
+    return 'No se pudo completar la operación. Inténtalo de nuevo más tarde.', 503
 
 # --- FUNCIÓN DE ENVÍO DE CORREOS DE RECUPERACIÓN (CON LOGO) ---
 def send_reset_email(to_email, reset_code):
@@ -213,10 +202,10 @@ def send_reset_email(to_email, reset_code):
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=20) as server:
             server.starttls()
             server.login(SMTP_USER, SMTP_PASSWORD)
-            server.sendmail(SMTP_USER, to_email, msg.as_string())
+            server.sendmail(parseaddr(msg['From'])[1], to_email, msg.as_string())
         return True
-    except Exception as e:
-        print(f"Error enviando correo de restablecimiento: {e}")
+    except Exception:
+        logging.warning('No se pudo enviar el correo de restablecimiento.')
         return False
 
 # --- FUNCIÓN DE ENVÍO DE CORREOS DE VERIFICACIÓN (CON LOGO) ---
@@ -258,10 +247,10 @@ def send_verification_email(to_email, verify_code):
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=20) as server:
             server.starttls()
             server.login(SMTP_USER, SMTP_PASSWORD)
-            server.sendmail(SMTP_USER, to_email, msg.as_string())
+            server.sendmail(parseaddr(msg['From'])[1], to_email, msg.as_string())
         return True
-    except Exception as e:
-        print(f"Error enviando correo de verificación: {e}")
+    except Exception:
+        logging.warning('No se pudo enviar el correo de verificación.')
         return False
 
 # --- FUNCIÓN WAKE-ON-LAN ---
@@ -329,11 +318,7 @@ def index():
         return redirect(url_for('login'))
     
     user_id = session['user_id']
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, name, mac, wake_method, wake_host, wake_port FROM devices WHERE user_sub = ?", (str(user_id),))
-    devices = cursor.fetchall()
-    conn.close()
+    devices = database.fetch_all('SELECT id, name, mac, wake_method, wake_host, wake_port FROM devices WHERE user_sub = %s', (str(user_id),))
     
     return render_template('dashboard.html', devices=devices, email=session.get('email'), alexa_ready=alexa_gateway.is_linked(str(user_id)), allow_local=app.config['ALLOW_LOCAL_WOL'])
 
@@ -344,11 +329,7 @@ def login():
         email = request.form['email']
         password = request.form['password']
         
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, email, password, is_verified FROM users WHERE email = ?", (email,))
-        user = cursor.fetchone()
-        conn.close()
+        user = database.fetch_one('SELECT id, email, password, is_verified FROM users WHERE email = %s', (email,))
         
         if user and check_password_hash(user[2], password):
             # Permite el acceso si está verificado o si el valor es nulo/1
@@ -415,32 +396,18 @@ def callback_amazon():
             return redirect(url_for('login'))
         amazon_email = profile_data.get("email", f"{amazon_unique_id}@amazon.user")
 
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT id, email FROM users WHERE amazon_id = ?", (amazon_unique_id,))
-        user = cursor.fetchone()
-
-        if user:
-            session['user_id'] = user[0]
-            session['email'] = user[1]
-        else:
-            cursor.execute(
-                "INSERT INTO users (email, password, amazon_id, is_verified) VALUES (?, ?, ?, 1)",
-                (amazon_email, 'AUTH_AMAZON_SECURE', amazon_unique_id)
-            )
-            conn.commit()
-            
-            cursor.execute("SELECT id, email FROM users WHERE amazon_id = ?", (amazon_unique_id,))
+        with database.connection() as conn, conn.cursor() as cursor:
+            cursor.execute('SELECT id, email FROM users WHERE amazon_id = %s', (amazon_unique_id,))
             user = cursor.fetchone()
-            session['user_id'] = user[0]
-            session['email'] = user[1]
-
-        conn.close()
+            if not user:
+                cursor.execute('INSERT INTO users (email, password, amazon_id, is_verified) VALUES (%s, %s, %s, 1)',
+                               (amazon_email, 'AUTH_AMAZON_SECURE', amazon_unique_id))
+                user = (cursor.lastrowid, amazon_email)
+        session['user_id'], session['email'] = user
         log_action(session['user_id'], "LOGIN_AMAZON", "Inicio de sesión vía Amazon exitoso")
         
-    except Exception as e:
-        print(f"[ERROR AMAZON CALLBACK]: {e}")
+    except Exception:
+        logging.warning('No se pudo completar el acceso con Amazon.')
         return redirect(url_for('login'))
 
     return redirect(url_for('index'))
@@ -451,36 +418,33 @@ def register():
     if request.method == 'POST':
         email = request.form['email'].strip().lower()
         password = request.form['password']
+        if len(email) > 150 or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', email):
+            return render_template('register.html', error='Introduce un correo válido de hasta 150 caracteres.'), 400
         if not valid_password(password):
             return render_template('register.html', error='La contraseña debe tener al menos 8 caracteres, una mayúscula, un número y un símbolo.'), 400
         hashed_password = generate_password_hash(password)
         code = str(secrets.randbelow(900000) + 100000)
         
         try:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            existing = cursor.execute('SELECT id, password, is_verified FROM users WHERE email = ?', (email,)).fetchone()
+            with database.connection() as conn, conn.cursor() as cursor:
+                cursor.execute('SELECT id, password, is_verified FROM users WHERE email = %s', (email,))
+                existing = cursor.fetchone()
+                if not existing:
+                    cursor.execute('INSERT INTO users (email, password, is_verified, verification_code) VALUES (%s, %s, 0, %s)',
+                                   (email, hashed_password, None))
             if existing:
-                conn.close()
                 if not existing[2] and check_password_hash(existing[1], password):
                     session['pending_email'] = email
                     session['verify_challenge'] = create_challenge(email, 'verify', code)
                     flash('Código enviado.' if send_verification_email(email, code) else 'No se pudo enviar el correo. Puedes solicitarlo de nuevo.', 'info')
                     return redirect(url_for('verify_account'))
                 return render_template('register.html', error='El correo ya está registrado.'), 400
-            cursor.execute(
-                "INSERT INTO users (email, password, is_verified, verification_code) VALUES (?, ?, 0, ?)",
-                (email, hashed_password, None)
-            )
-            conn.commit()
-            conn.close()
-
             session['pending_email'] = email
             session['verify_challenge'] = create_challenge(email, 'verify', code)
             if not send_verification_email(email, code):
                 flash('No se pudo enviar el correo. Puedes volver a solicitarlo.', 'danger')
             return redirect(url_for('verify_account'))
-        except Exception:
+        except database.pymysql.IntegrityError:
             error = 'El correo ya está registrado o hubo un error en la base de datos.'
             
     return render_template('register.html', error=error)
@@ -500,22 +464,15 @@ def verify_account():
         entered_code = request.form['code']
         email = session['pending_email']
 
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, verification_code FROM users WHERE email = ?", (email,))
-        user = cursor.fetchone()
-
+        user = database.fetch_one('SELECT id, verification_code FROM users WHERE email = %s', (email,))
         if user and consume_challenge(session.get('verify_challenge'), 'verify', entered_code) == email:
-            cursor.execute("UPDATE users SET is_verified = 1, verification_code = NULL WHERE email = ?", (email,))
-            conn.commit()
-            conn.close()
+            database.execute('UPDATE users SET is_verified = 1, verification_code = NULL WHERE email = %s', (email,))
 
             session.pop('pending_email', None)
             session.pop('verify_challenge', None)
             log_action(user[0], "REGISTER_VERIFIED", f"Cuenta verificada exitosamente para {email}")
             return redirect(url_for('login'))
         else:
-            conn.close()
             error = "Código incorrecto o expirado. Puedes solicitar otro código."
 
     return render_template('verify_register.html', error=error)
@@ -526,11 +483,7 @@ def forgot_password():
     if request.method == 'POST':
         email = request.form['email']
         
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT id FROM users WHERE email = ?", (email,))
-        user = cursor.fetchone()
-        conn.close()
+        user = database.fetch_one('SELECT id FROM users WHERE email = %s', (email,))
 
         if user:
             code = str(secrets.randbelow(900000) + 100000)
@@ -563,11 +516,7 @@ def reset_password():
             hashed_password = generate_password_hash(new_password)
             email = session['reset_email']
 
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("UPDATE users SET password = ? WHERE email = ?", (hashed_password, email))
-            conn.commit()
-            conn.close()
+            database.execute('UPDATE users SET password = %s WHERE email = %s', (hashed_password, email))
 
             session.pop('reset_challenge', None)
             session.pop('reset_email', None)
@@ -614,11 +563,8 @@ def add_device():
         return redirect(url_for('index'))
     user_sub = str(session['user_id'])
     
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO devices (name, mac, user_sub, wake_method, wake_host, wake_port) VALUES (?, ?, ?, ?, ?, ?)", (name, mac, user_sub, method, host, port))
-    conn.commit()
-    conn.close()
+    database.execute('INSERT INTO devices (name, mac, user_sub, wake_method, wake_host, wake_port) VALUES (%s, %s, %s, %s, %s, %s)',
+                     (name, mac, user_sub, method, host, port))
     
     log_action(session['user_id'], "ADD_DEVICE", f"Dispositivo añadido: {name} ({mac})")
     return redirect(url_for('index'))
@@ -629,11 +575,7 @@ def wake_device(device_id):
         return redirect(url_for('login'))
         
     user_sub = str(session['user_id'])
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT name, mac, wake_method, wake_host, wake_port FROM devices WHERE id = ? AND user_sub = ?", (device_id, user_sub))
-    row = cursor.fetchone()
-    conn.close()
+    row = database.fetch_one('SELECT name, mac, wake_method, wake_host, wake_port FROM devices WHERE id = %s AND user_sub = %s', (device_id, user_sub))
     
     if row:
         dev_name, dev_mac, method, host, port = row
@@ -660,15 +602,9 @@ def update_device_settings(device_id):
     except ValueError as error:
         flash(str(error), 'danger')
         return redirect(url_for('index'))
-    conn = get_db_connection()
-    try:
-        cursor = conn.cursor()
-        cursor.execute('UPDATE devices SET wake_method=?, wake_host=?, wake_port=? WHERE id=? AND user_sub=?',
-                       (method, host, port, device_id, str(session['user_id'])))
-        conn.commit()
-        flash('Método de encendido guardado.' if cursor.rowcount else 'Equipo no encontrado.', 'success' if cursor.rowcount else 'danger')
-    finally:
-        conn.close()
+    count = database.execute('UPDATE devices SET wake_method=%s, wake_host=%s, wake_port=%s WHERE id=%s AND user_sub=%s',
+                             (method, host, port, device_id, str(session['user_id'])))
+    flash('Método de encendido guardado.' if count else 'Equipo no encontrado.', 'success' if count else 'danger')
     return redirect(url_for('index'))
 
 @app.route('/delete/<int:device_id>', methods=['POST'])
@@ -677,13 +613,10 @@ def delete_device(device_id):
         return redirect(url_for('login'))
         
     user_sub = str(session['user_id'])
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM devices WHERE id = ? AND user_sub = ?", (device_id, user_sub))
-    conn.commit()
-    conn.close()
+    count = database.execute('DELETE FROM devices WHERE id = %s AND user_sub = %s', (device_id, user_sub))
     
-    log_action(session['user_id'], "DELETE_DEVICE", f"Dispositivo ID {device_id} eliminado")
+    if count:
+        log_action(session['user_id'], "DELETE_DEVICE", f"Dispositivo ID {device_id} eliminado")
     return redirect(url_for('index'))
 
 
@@ -712,11 +645,7 @@ def oauth_authorize():
     if request.method == 'POST':
         email = request.form.get('email', '')
         password = request.form.get('password', '')
-        conn = get_db_connection()
-        try:
-            user = conn.cursor().execute('SELECT id, password, is_verified FROM users WHERE email = ?', (email,)).fetchone()
-        finally:
-            conn.close()
+        user = database.fetch_one('SELECT id, password, is_verified FROM users WHERE email = %s', (email,))
         if user and user[2] and check_password_hash(user[1], password):
             auth_code = secrets.token_urlsafe(32)
             with state_connection() as db:
@@ -831,11 +760,7 @@ def alexa_smarthome():
                                   'payload': {'type': 'ACCEPT_GRANT_FAILED', 'message': 'No se pudo autorizar el envío de eventos a Alexa.'}})
         return jsonify(event={'header': {'namespace': 'Alexa.Authorization', 'name': 'AcceptGrant.Response', 'payloadVersion': '3', 'messageId': str(uuid.uuid4())}, 'payload': {}})
     if namespace == 'Alexa.Discovery' and name == 'Discover':
-        conn = get_db_connection()
-        try:
-            devices = conn.cursor().execute('SELECT id, name, mac, wake_method FROM devices WHERE user_sub = ?', (user_id,)).fetchall()
-        finally:
-            conn.close()
+        devices = database.fetch_all('SELECT id, name, mac, wake_method FROM devices WHERE user_sub = %s', (user_id,))
         endpoints = []
         for dev_id, dev_name, dev_mac, method in devices:
             if method == 'local' and not app.config['ALLOW_LOCAL_WOL']:
@@ -860,12 +785,8 @@ def alexa_smarthome():
         endpoint_id = endpoint.get('endpointId')
         if not isinstance(endpoint_id, str) or not endpoint_id.isascii() or not endpoint_id.isdigit() or len(endpoint_id) > 10 or int(endpoint_id) > 2147483647:
             return alexa_error(directive, 'NO_SUCH_ENDPOINT', 'Identificador de equipo inválido.')
-        conn = get_db_connection()
-        try:
-            device = conn.cursor().execute('SELECT name, mac, wake_method, wake_host, wake_port FROM devices WHERE id = ? AND user_sub = ?',
-                                           (endpoint.get('endpointId'), user_id)).fetchone()
-        finally:
-            conn.close()
+        device = database.fetch_one('SELECT name, mac, wake_method, wake_host, wake_port FROM devices WHERE id = %s AND user_sub = %s',
+                                    (endpoint.get('endpointId'), user_id))
         if not device:
             return alexa_error(directive, 'NO_SUCH_ENDPOINT', 'No existe un equipo autorizado con ese identificador.')
         if name == 'TurnOff':
@@ -897,4 +818,4 @@ def alexa_smarthome():
 if __name__ == '__main__':
     from waitress import serve
     alexa_gateway.start()
-    serve(app, host=os.environ.get('HOST', '0.0.0.0'), port=int(os.environ.get('PORT', '5000')))
+    serve(app, host=os.environ.get('HOST', '127.0.0.1'), port=int(os.environ.get('PORT', '5000')), threads=4)
