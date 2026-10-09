@@ -209,7 +209,8 @@ class ApplicationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual([device['id'] for device in response.json['devices']], [1, 3])
         with self.business_connection() as db:
-            self.assertEqual(db.execute('SELECT name, mac, user_sub, wake_method FROM devices WHERE id=3').fetchone(),
+            row = db.execute('SELECT name, mac, user_sub, wake_method FROM devices WHERE id=3').fetchone()
+            self.assertEqual((row[0], row[1], str(row[2]), row[3]),
                              ('Nuevo', 'AA:BB:CC:DD:EE:11', '1', 'alexa'))
 
     def test_mobile_edit_enforces_csrf_ownership_and_preserves_settings(self):

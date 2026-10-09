@@ -18,6 +18,7 @@
             <span class="fw-bold fs-5 text-body">WoL<span class="text-success fw-normal">Pro</span></span>
         </a>
         <div class="ms-auto d-flex align-items-center gap-3">
+            {% if windows_agent_enabled %}<a href="{{ url_for('windows.panel') }}" class="btn btn-outline-success btn-sm">Control Windows</a>{% endif %}
             <span class="text-secondary small d-none d-md-inline">{{ email }}</span>
             <a href="/logout" class="btn btn-outline-danger btn-sm"><i class="fa-solid fa-power-off me-1"></i> Salir</a>
         </div>

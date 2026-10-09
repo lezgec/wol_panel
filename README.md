@@ -39,7 +39,13 @@ Todas las escrituras requieren sesión y cabecera `X-CSRF-Token`; creación y ed
 ## Pruebas
 
 ```bash
-python -m unittest -v test_app test_database
+python -m unittest -v test_app test_database test_windows_agent
 ```
 
 Más detalles en [TESTING.md](TESTING.md).
+
+## Control Windows
+
+El [agente Windows](https://github.com/lezgec/wolpro_agent) permite vincular un PC mediante tu cuenta, abrir aplicaciones autorizadas y apagarlo con una cuenta atrás cancelable. El panel incorpora acciones e historial; Alexa puede usar las mismas órdenes.
+
+Para activarlo en Azure, ejecuta `python migrate_db.py`, añade `ENABLE_WINDOWS_AGENT=1` al `.env` existente y reinicia tu servicio. Consulta los pasos en [WINDOWS_AGENT.md](WINDOWS_AGENT.md) y la [skill de acciones Alexa](alexa-custom/README.md).

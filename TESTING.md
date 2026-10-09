@@ -4,10 +4,10 @@
 
 ```bash
 python -m pip install -r requirements.txt
-python -m unittest -v test_app test_database
+python -m unittest -v test_app test_database test_windows_agent
 ```
 
-45 pruebas de Flask, contrato PyMySQL, transacciones y aislamiento con SQLite de
+Pruebas de Flask, contrato PyMySQL, transacciones y aislamiento con SQLite de
 prueba. El doble PyMySQL devuelve un entero de `execute`, por lo que no oculta
 el error habitual de encadenar `.fetchone()` a esa llamada. Los tests crean estado
 temporal propio; no usan `instance` ni las tablas de una instalación real.
@@ -46,7 +46,7 @@ export DB_HOST=127.0.0.1 DB_PORT=3306 DB_NAME=wol_test_manual DB_USER=wol_test_u
 read -rsp 'Contraseña de prueba: ' DB_PASSWORD
 export DB_PASSWORD
 export WOL_TEST_MARIADB=1
-python -m unittest -v test_app test_database test_mariadb
+python -m unittest -v test_app test_database test_windows_agent test_mariadb
 unset DB_PASSWORD WOL_TEST_MARIADB
 ```
 
@@ -64,19 +64,25 @@ DROP DATABASE wol_test_manual;
 DROP USER 'wol_test_user'@'127.0.0.1';
 ```
 
-Sin `WOL_TEST_MARIADB=1`, los 42 casos MariaDB se marcan como omitidos y no se
+Sin `WOL_TEST_MARIADB=1`, los casos MariaDB se marcan como omitidos y no se
 intenta conexión. Un error de configuración con la opción habilitada falla la
 suite, en lugar de ocultarse como omisión.
 
-## Resultado de esta entrega
+## Verificación del control Windows
 
-87 pruebas: 40 de aplicación sin MariaDB, 5 de contrato/instalador y 42 de aplicación
-con MariaDB 10.11.14 real en Windows x64/Python 3.13. La instancia portátil se
-preparó en una carpeta temporal, escuchando únicamente en loopback con puerto
-separado; cada ejecución creó/eliminó su propia base `wol_test_codex_*`. No se
-usó la VM Azure ni las bases de otras aplicaciones.
+La suite añade vinculación con código temporal, consumo único de credenciales,
+CSRF, propietario, catálogo permitido, revocación, cola sin repetición, caducidad,
+reportes, cancelación y comprobación final de autorización. La integración real
+verifica además solicitudes simultáneas para que una orden tenga un único
+consumidor. Las pruebas Custom cubren firma Lambda, ID de skill, intents y tareas
+para rutinas. El SQL se aplica a una base vacía y se reejecuta sin borrar datos.
 
-Quedan para Ubuntu: `systemd-analyze verify`, `nginx -t`, los certificados existentes,
-DNS y comportamiento Cloudflare, consumo combinado de RAM, entrega SMTP real,
-vinculación/certificación Amazon y encendido físico. Las órdenes de Echo se prueban
-con respuestas simuladas del gateway; el éxito automático no demuestra arranque.
+La suite completa de esta entrega contiene 232 comprobaciones Python (incluye
+flujos compartidos ejecutados con SQLite y MariaDB 10.11.14). El agente separado
+tiene 22 pruebas .NET y compilación Release sin advertencias. Su vista de
+verificación comprueba DPAPI y dibuja la ventana sin usar credenciales reales ni
+ejecutar órdenes. Nunca se apaga el PC durante las pruebas.
+
+La prueba automatizada no confirma encendido físico, apertura de Spotify real,
+apagado real, entrega SMTP ni vinculación/certificación en Amazon. La VM Azure
+se actualiza manualmente y los Echo deben probarse después de configurar la skill.

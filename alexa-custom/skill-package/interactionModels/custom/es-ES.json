@@ -1,0 +1,39 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "wol pro",
+      "intents": [
+        {
+          "name": "ExecuteActionIntent",
+          "slots": [
+            {
+              "name": "action",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "ejecuta {action}",
+            "activa {action}"
+          ]
+        },
+        {
+          "name": "AMAZON.HelpIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.StopIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.CancelIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.FallbackIntent",
+          "samples": []
+        }
+      ],
+      "types": []
+    }
+  }
+}

@@ -105,6 +105,9 @@ app.jinja_env.globals['csrf_token'] = csrf_token
 
 @app.before_request
 def protect_forms():
+    # Estas rutas verifican Bearer o firma del puente; no usan la sesión web.
+    if request.endpoint and request.endpoint.startswith('windows.') and (request.path.startswith('/api/agent/v1/') or request.endpoint == 'windows.alexa_custom'):
+        return
     if request.path.startswith('/api/mobile/v1/') and 'user_id' not in session:
         return jsonify(error='authentication_required', message='Inicia sesión para continuar.'), 401
     if (request.method == 'POST' or (request.path.startswith('/api/mobile/v1/') and request.method in ('PUT', 'DELETE'))) and request.endpoint not in ('oauth_token', 'alexa_smarthome'):
@@ -168,7 +171,7 @@ def log_action(user_id, action, details):
 @app.errorhandler(database.pymysql.MySQLError)
 def database_unavailable(error):
     logging.error('Falló una operación de MariaDB (%s).', type(error).__name__)
-    if request.path.startswith('/api/mobile/v1/'):
+    if request.path.startswith(('/api/mobile/v1/', '/api/agent/v1/')):
         return jsonify(error='database_unavailable', message='No se pudo completar la operación. Inténtalo de nuevo más tarde.'), 503
     return 'No se pudo completar la operación. Inténtalo de nuevo más tarde.', 503
 
@@ -326,6 +329,9 @@ def send_router_wol(mac, host, port):
 def index():
     if 'user_id' not in session:
         return redirect(url_for('login'))
+    agent_return = session.pop('agent_return', '')
+    if agent_return.startswith('/windows/link?'):
+        return redirect(agent_return)
     
     user_id = session['user_id']
     devices = database.fetch_all('SELECT id, name, mac, wake_method, wake_host, wake_port FROM devices WHERE user_sub = %s', (str(user_id),))
@@ -914,6 +920,9 @@ def alexa_smarthome():
                                          'correlationToken': header.get('correlationToken', '')},
                               'endpoint': {'endpointId': str(endpoint['endpointId'])}, 'payload': {}})
     return alexa_error(directive, 'INVALID_DIRECTIVE', 'Directiva no compatible.')
+
+from windows_agent import install as install_windows_agent
+agent_service = install_windows_agent(app, database, state_connection, rate_allowed, log_action)
 
 if __name__ == '__main__':
     from waitress import serve

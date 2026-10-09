@@ -9,8 +9,9 @@ def migrate():
     name = connection_settings()['database']
     if name != 'wol_panel' and not name.startswith('wol_test_'):
         raise ValueError('La migración solo admite wol_panel o una base aislada wol_test_*.')
-    # El archivo solo contiene DDL estático; no se interpolan valores de usuario.
-    source = '\n'.join(line for line in SCHEMA_PATH.read_text(encoding='utf-8').splitlines()
+    # Solo DDL estático; no se interpolan valores de usuario.
+    schemas = [SCHEMA_PATH, SCHEMA_PATH.parent / 'windows_agent.sql']
+    source = '\n'.join(line for line in '\n'.join(path.read_text(encoding='utf-8-sig') for path in schemas).splitlines()
                        if not line.lstrip().startswith('--'))
     with connection() as conn, conn.cursor() as cursor:
         for statement in source.split(';'):

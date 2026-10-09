@@ -1,0 +1,91 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Execute WoL Pro action",
+    "version": "1",
+    "x-amzn-alexa-access-scope": "public",
+    "x-amzn-display-details": {
+      "es-MX": {
+        "title": "Ejecutar una acción de Windows",
+        "description": "Envía una orden a tu PC vinculado con WoL Pro."
+      },
+      "es-ES": {
+        "title": "Ejecutar una acción de Windows",
+        "description": "Envía una orden a tu PC vinculado con WoL Pro."
+      },
+      "es-US": {
+        "title": "Ejecutar una acción de Windows",
+        "description": "Envía una orden a tu PC vinculado con WoL Pro."
+      }
+    }
+  },
+  "paths": {
+    "/ExecuteAction": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Input"
+              },
+              "examples": {
+                "testExample": {
+                  "summary": "Acción creada previamente en una cuenta de prueba",
+                  "value": {
+                    "action": "Spotify en mi PC"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Orden aceptada en la cola",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Acción no encontrada, cuenta sin vincular, PC desconectado o permiso denegado"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "x-amzn-display-details": {
+              "es-MX": {
+                "name": "Nombre de la acción",
+                "description": "Nombre exacto creado en el panel, por ejemplo Spotify en mi PC"
+              },
+              "es-ES": {
+                "name": "Nombre de la acción",
+                "description": "Nombre exacto creado en el panel, por ejemplo Spotify en mi PC"
+              },
+              "es-US": {
+                "name": "Nombre de la acción",
+                "description": "Nombre exacto creado en el panel, por ejemplo Spotify en mi PC"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
