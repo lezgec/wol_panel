@@ -1,0 +1,10 @@
+.env
+.env.production
+.env.*
+!.env.example
+!.env.production.example
+instance/
+venv/
+__pycache__/
+*.pyc
+artifacts/

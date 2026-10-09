@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="es" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Registro - WoL Pro</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <style>
+        body { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem 0; }
+        .card-register { border-radius: 1rem; width: 100%; max-width: 450px; padding: 2.5rem; box-shadow: 0 10px 25px rgba(0,0,0,0.3); }
+        .requirement-list { font-size: 0.85rem; list-style: none; padding-left: 0; }
+        .requirement-list li { margin-bottom: 0.3rem; color: #6c757d; }
+        .requirement-list li.valid { color: #198754; }
+    </style>
+</head>
+<body class="bg-body-secondary">
+    <div class="card card-register bg-body border">
+        <div class="text-center mb-4">
+            <div class="d-inline-flex align-items-center justify-content-center bg-dark rounded-4 p-3 mb-2 border border-secondary shadow-sm">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="40" height="40">
+                    <defs>
+                        <linearGradient id="primaryGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#0d6efd" /><stop offset="100%" stop-color="#052c65" />
+                        </linearGradient>
+                        <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" stop-color="#198754" /><stop offset="100%" stop-color="#20c997" />
+                        </linearGradient>
+                    </defs>
+                    <circle cx="60" cy="60" r="54" fill="url(#primaryGrad)" opacity="0.25" />
+                    <path d="M 28 52 L 42 80 L 60 46 L 78 80 L 92 52" stroke="url(#accentGrad)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+                    <path d="M 60 26 L 60 44" stroke="#198754" stroke-width="8" stroke-linecap="round" />
+                </svg>
+            </div>
+            <h3 class="fw-bold m-0">WoL<span class="text-success fw-normal">Pro</span></h3>
+            <p class="text-secondary small">Crear Cuenta de Acceso</p>
+        </div>
+
+        {% if error %}
+            <div class="alert alert-danger py-2 small text-center" role="alert">{{ error }}</div>
+        {% endif %}
+
+        <form method="POST" onsubmit="return validateForm()">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">Correo Electrónico</label>
+                <input type="email" name="email" class="form-control" required autocomplete="email">
+            </div>
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">Contraseña</label>
+                <input type="password" id="password" name="password" class="form-control" required oninput="checkPasswordStrength()">
+            </div>
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">Confirmar Contraseña</label>
+                <input type="password" id="confirm_password" class="form-control" required oninput="checkPasswordMatch()">
+                <div id="matchFeedback" class="form-text small text-danger mt-1" style="display: none;">Las contraseñas no coinciden.</div>
+            </div>
+
+            <div class="card bg-body-secondary p-3 mb-4 border-0">
+                <p class="small fw-semibold mb-2 text-secondary">La contraseña debe cumplir con:</p>
+                <ul class="requirement-list">
+                    <li id="lengthReq"><i class="fa-solid fa-circle-xmark me-2"></i>Mínimo 8 caracteres</li>
+                    <li id="uppercaseReq"><i class="fa-solid fa-circle-xmark me-2"></i>Al menos una letra mayúscula</li>
+                    <li id="numberReq"><i class="fa-solid fa-circle-xmark me-2"></i>Al menos un número</li>
+                    <li id="specialReq"><i class="fa-solid fa-circle-xmark me-2"></i>Al menos un carácter especial</li>
+                </ul>
+            </div>
+
+            <button type="submit" id="submitBtn" class="btn btn-primary w-100 py-2 fw-semibold shadow-sm mb-3" disabled>
+                <i class="fa-solid fa-check me-2"></i> Registrarse
+            </button>
+            <div class="text-center mt-2">
+                <a href="/login" class="text-decoration-none small text-secondary">¿Ya tienes una cuenta? Inicia sesión</a>
+            </div>
+        </form>
+    </div>
+
+    <script>
+        function checkPasswordStrength() {
+            const password = document.getElementById('password').value;
+            updateRequirement('lengthReq', password.length >= 8);
+            updateRequirement('uppercaseReq', /[A-Z]/.test(password));
+            updateRequirement('numberReq', /[0-9]/.test(password));
+            updateRequirement('specialReq', /[!@#$%^&*(),.?":{}|<>]/.test(password));
+            checkPasswordMatch();
+        }
+        function updateRequirement(id, isValid) {
+            const el = document.getElementById(id);
+            const icon = el.querySelector('i');
+            if (isValid) { el.classList.add('valid'); icon.className = 'fa-solid fa-circle-check me-2'; }
+            else { el.classList.remove('valid'); icon.className = 'fa-solid fa-circle-xmark me-2'; }
+        }
+        function checkPasswordMatch() {
+            const p = document.getElementById('password').value;
+            const cp = document.getElementById('confirm_password').value;
+            const ok = p.length >= 8 && /[A-Z]/.test(p) && /[0-9]/.test(p) && /[!@#$%^&*(),.?":{}|<>]/.test(p);
+            const match = p === cp && cp !== '';
+            document.getElementById('matchFeedback').style.display = (cp !== '' && !match) ? 'block' : 'none';
+            document.getElementById('submitBtn').disabled = !(ok && match);
+        }
+        function validateForm() {
+            return !document.getElementById('submitBtn').disabled;
+        }
+    </script>
+</body>
+</html>
