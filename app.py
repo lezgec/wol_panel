@@ -755,7 +755,25 @@ def alexa_smarthome():
                                   'payload': {'type': 'ACCEPT_GRANT_FAILED', 'message': 'Código de autorización inválido.'}})
         try:
             alexa_gateway.accept_grant(user_id, grant['code'])
-        except Exception:
+        except Exception as exc:
+            response = getattr(exc, "response", None)
+            status = getattr(response, "status_code", None)
+            amazon_error = "no_disponible"
+            if response is not None:
+                try:
+                    data = response.json()
+                    if isinstance(data, dict):
+                        amazon_error = str(
+                            data.get("error", "sin_codigo")
+                        )[:60]
+                except ValueError:
+                    pass
+            app.logger.warning(
+                "ALEXA_GRANT_DIAGNOSTICO tipo=%s http=%s codigo=%s",
+                type(exc).__name__,
+                status,
+                amazon_error
+            )
             return jsonify(event={'header': {'namespace': 'Alexa.Authorization', 'name': 'ErrorResponse', 'payloadVersion': '3', 'messageId': str(uuid.uuid4())},
                                   'payload': {'type': 'ACCEPT_GRANT_FAILED', 'message': 'No se pudo autorizar el envío de eventos a Alexa.'}})
         return jsonify(event={'header': {'namespace': 'Alexa.Authorization', 'name': 'AcceptGrant.Response', 'payloadVersion': '3', 'messageId': str(uuid.uuid4())}, 'payload': {}})
