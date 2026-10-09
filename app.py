@@ -73,7 +73,7 @@ def rate_allowed(bucket, identity, limit, seconds):
 
 REQUEST_LIMITS = {'login': (15, 60), 'oauth_authorize': (15, 60), 'oauth_token': (120, 60),
                   'register': (5, 900), 'forgot_password': (5, 900), 'wake_device': (12, 60),
-                  'add_device': (30, 60), 'update_device_settings': (30, 60)}
+                  'add_device': (30, 60), 'update_device_settings': (30, 60), 'mobile_wake': (12, 60)}
 
 def create_challenge(email, purpose, code):
     challenge_id = secrets.token_urlsafe(32)
@@ -104,16 +104,23 @@ app.jinja_env.globals['csrf_token'] = csrf_token
 
 @app.before_request
 def protect_forms():
+    if request.path.startswith('/api/mobile/v1/') and 'user_id' not in session:
+        return jsonify(error='authentication_required', message='Inicia sesión para continuar.'), 401
     if request.method == 'POST' and request.endpoint not in ('oauth_token', 'alexa_smarthome'):
         expected = session.get('csrf_token')
-        supplied = request.form.get('csrf_token', '')
-        if not expected or not secrets.compare_digest(expected, supplied):
+        supplied = request.headers.get('X-CSRF-Token', '') if request.path.startswith('/api/mobile/v1/') else request.form.get('csrf_token', '')
+        if not expected or not secrets.compare_digest(expected.encode('utf-8'), supplied.encode('utf-8')):
+            if request.path.startswith('/api/mobile/v1/'):
+                return jsonify(error='csrf_expired', message='La sesión del formulario expiró. Actualiza tus equipos.'), 400
             return 'El formulario expiró. Recarga la página e inténtalo de nuevo.', 400
     if request.method == 'POST':
         rule = REQUEST_LIMITS.get(request.endpoint)
         if request.endpoint == 'verify_account' and request.form.get('action') == 'resend':
             rule = (5, 900)
-        if rule and not rate_allowed(request.endpoint, str(session.get('user_id') or request.remote_addr), *rule):
+        bucket = 'wake_device' if request.endpoint == 'mobile_wake' else request.endpoint
+        if rule and not rate_allowed(bucket, str(session.get('user_id') or request.remote_addr), *rule):
+            if request.path.startswith('/api/mobile/v1/'):
+                return jsonify(error='rate_limited', message='Demasiadas solicitudes. Espera antes de intentarlo de nuevo.'), 429, {'Retry-After': str(rule[1])}
             return 'Demasiadas solicitudes. Espera antes de intentarlo de nuevo.', 429, {'Retry-After': str(rule[1])}
 
 @app.after_request
@@ -160,6 +167,8 @@ def log_action(user_id, action, details):
 @app.errorhandler(database.pymysql.MySQLError)
 def database_unavailable(error):
     logging.error('Falló una operación de MariaDB (%s).', type(error).__name__)
+    if request.path.startswith('/api/mobile/v1/'):
+        return jsonify(error='database_unavailable', message='No se pudo completar la operación. Inténtalo de nuevo más tarde.'), 503
     return 'No se pudo completar la operación. Inténtalo de nuevo más tarde.', 503
 
 # --- FUNCIÓN DE ENVÍO DE CORREOS DE RECUPERACIÓN (CON LOGO) ---
@@ -569,28 +578,51 @@ def add_device():
     log_action(session['user_id'], "ADD_DEVICE", f"Dispositivo añadido: {name} ({mac})")
     return redirect(url_for('index'))
 
+def wake_result(device_id, user_id):
+    """Una sola implementación de encendido para panel y cliente móvil."""
+    user_sub = str(user_id)
+    row = database.fetch_one('SELECT name, mac, wake_method, wake_host, wake_port FROM devices WHERE id = %s AND user_sub = %s', (device_id, user_sub))
+    if not row:
+        return dict(error='device_not_found', message='Equipo no encontrado.', category='danger'), 404
+    dev_name, dev_mac, method, host, port = row
+    if method == 'alexa':
+        return dict(error='alexa_required', message=f'Enciende {dev_name} desde la app Alexa o diciendo «Alexa, enciende {dev_name}». Para encender aquí, selecciona Router por Internet.', category='info'), 409
+    if method == 'local' and not app.config['ALLOW_LOCAL_WOL']:
+        return dict(error='local_unavailable', message='Cambia este equipo a Alexa o Router por Internet. La red local del servidor no alcanza tu casa.', category='warning'), 409
+    if method not in ('router', 'local'):
+        return dict(error='invalid_method', message='Revisa el método de encendido del equipo.', category='danger'), 409
+    sent = send_router_wol(dev_mac, host, port) if method == 'router' else send_wol(dev_mac)
+    if not sent:
+        return dict(error='wake_failed', message=f'No se pudo enviar el paquete a {dev_name}. Revisa la MAC y la red del servidor.', category='danger'), 502
+    log_action(user_id, "SEND_WOL", f"Orden WoL enviada a {dev_name} ({dev_mac})")
+    return dict(message=f'Paquete de encendido enviado a {dev_name}. Esto no confirma que haya arrancado.', category='success', sent=True), 200
+
+
+@app.route('/api/mobile/v1/devices')
+def mobile_devices():
+    if 'user_id' not in session:
+        return jsonify(error='authentication_required', message='Inicia sesión para ver tus equipos.'), 401
+    rows = database.fetch_all('SELECT id, name, mac, wake_method, wake_host, wake_port FROM devices WHERE user_sub = %s ORDER BY id', (str(session['user_id']),))
+    devices = [dict(id=row[0], name=row[1], mac=row[2], wake_method=row[3],
+                    can_wake=row[3] == 'router' or (row[3] == 'local' and app.config['ALLOW_LOCAL_WOL'])) for row in rows]
+    return jsonify(version=1, devices=devices, email=session.get('email'), csrf_token=csrf_token())
+
+
+@app.route('/api/mobile/v1/devices/<int:device_id>/wake', methods=['POST'])
+def mobile_wake(device_id):
+    if 'user_id' not in session:
+        return jsonify(error='authentication_required', message='Inicia sesión para encender tus equipos.'), 401
+    result, status = wake_result(device_id, session['user_id'])
+    result.pop('category')
+    return jsonify(result), status
+
+
 @app.route('/wake/<int:device_id>', methods=['POST'])
 def wake_device(device_id):
     if 'user_id' not in session:
         return redirect(url_for('login'))
-        
-    user_sub = str(session['user_id'])
-    row = database.fetch_one('SELECT name, mac, wake_method, wake_host, wake_port FROM devices WHERE id = %s AND user_sub = %s', (device_id, user_sub))
-    
-    if row:
-        dev_name, dev_mac, method, host, port = row
-        if method == 'alexa':
-            flash(f'Enciende {dev_name} desde la app Alexa o diciendo «Alexa, enciende {dev_name}». Para encender desde esta web, selecciona el método Router por Internet.', 'info')
-        elif method == 'local' and not app.config['ALLOW_LOCAL_WOL']:
-            flash('Cambia este equipo a Alexa o Router por Internet. La red local del servidor no alcanza tu casa.', 'warning')
-        elif send_router_wol(dev_mac, host, port) if method == 'router' else send_wol(dev_mac):
-            log_action(session['user_id'], "SEND_WOL", f"Orden WoL enviada a {dev_name} ({dev_mac})")
-            flash(f'Paquete de encendido enviado a {dev_name}.', 'success')
-        else:
-            flash(f'No se pudo enviar el paquete a {dev_name}. Revisa la MAC y la red del servidor.', 'danger')
-    else:
-        flash('Equipo no encontrado.', 'danger')
-        
+    result, _ = wake_result(device_id, session['user_id'])
+    flash(result['message'], result['category'])
     return redirect(url_for('index'))
 
 @app.route('/devices/<int:device_id>/settings', methods=['POST'])

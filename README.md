@@ -24,6 +24,15 @@ Abre [http://localhost:5000](http://localhost:5000).
 
 Las cuentas y los equipos se guardan en MariaDB. Conserva la carpeta indicada en `WOL_STATE_DIR` y la clave `FLASK_SECRET_KEY` para mantener la vinculación con Alexa al actualizar. No subas `.env` ni credenciales al repositorio.
 
+## Cliente móvil
+
+La app [wol-pro-app](https://github.com/lezgec/wol-pro-app) reutiliza el acceso web y muestra equipos en una pantalla nativa. La API versionada usa la sesión Flask existente:
+
+- `GET /api/mobile/v1/devices`: equipos del usuario, correo y token CSRF.
+- `POST /api/mobile/v1/devices/{id}/wake`: requiere sesión y cabecera `X-CSRF-Token`; comprueba propiedad y reutiliza la lógica del panel.
+
+Las respuestas no se almacenan en caché. Las órdenes móviles comparten el límite de solicitudes del panel. Alexa devuelve instrucciones; enviar WoL no confirma que el equipo esté encendido. No se requieren cambios de tablas ni credenciales nuevas.
+
 ## Pruebas
 
 ```bash
