@@ -2,7 +2,7 @@
 
 ## Comprobaciones locales
 
-- Backend: 153 pruebas pasaron en la ejecución completa de `test_app`, `test_windows_agent` y `test_monetization`. Después se añadió una regresión de reemplazo de suscripciones; las 17 pruebas de monetización pasaron con ese ajuste (154 casos distintos en la suite final).
+- Backend: 154 pruebas de `test_app`, `test_windows_agent` y `test_monetization` pasaron en GitHub. Localmente también pasaron las 17 pruebas finales de monetización y cinco pruebas de acceso/transacciones de base de datos.
 - Se comprueban cuotas Free/Premium, selección al vencer, Alexa Discovery, restricciones en cola y antes de ejecutar, cancelación, propiedad de recibos, pagos pendientes/cancelados/expirados, reemplazo de tokens, firma ECDSA sobre la consulta original, recompensa de treinta minutos, frecuencia publicitaria, TOTP, CSRF, suspensión, auditoría, promociones y solicitudes de eliminación.
 - App: 24 pruebas pasaron; TypeScript y ESLint sin errores. Exportación de bundles Hermes Android e iOS completada.
 - Android nativo: `:app:assembleDebug` completó correctamente con Expo 57, AdMob 17 y Expo IAP 6. El manifiesto corresponde a 1.1.0 / código 3, incluye Billing y bloquea `com.google.android.gms.permission.AD_ID` en modo inicial. El SDK también aporta permisos AdServices; revisar el manifiesto del AAB final y las declaraciones al activar anuncios.
@@ -11,7 +11,7 @@
 
 ## Integración continua
 
-Los repositorios incluyen CI para backend, MariaDB 11.4 aislada, app, agente Windows y frontend administrativo. La prueba MariaDB adicional compite con dos registros simultáneos Free para comprobar el bloqueo InnoDB y la cuota; no se ejecutó contra una base de producción. Consultar los resultados de Actions de la rama antes de desplegar.
+Los cuatro repositorios pasaron CI. En [backend y MariaDB](https://github.com/lezgec/wol_panel/actions/runs/38052736699), pasaron 154 pruebas de unidad y **141 pruebas contra MariaDB 11.4 aislada**, incluida la carrera entre dos registros Free para comprobar el bloqueo InnoDB y la cuota. No se ejecutaron contra una base de producción. También pasaron [app](https://github.com/lezgec/wol-pro-app/actions/runs/38052810212), [agente Windows](https://github.com/lezgec/wolpro_agent/actions/runs/38052811967) y [administrador](https://github.com/lezgec/wolpro_admin/actions/runs/38052742759).
 
 ## Pendiente de las cuentas reales
 

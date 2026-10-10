@@ -9,6 +9,8 @@ Código preparado para Free/Premium. Esta entrega **no actualiza Azure, Amazon n
 3. `wolpro_agent`: agente Windows 0.4.0. Conserva vinculación, aplicaciones, comandos y permisos al actualizar.
 4. `wol-pro-app`: app 1.1.0, código Android 3. Genera y firma un **nuevo** AAB en Android Studio.
 
+La entrega está en la rama `codex/monetization` de los cuatro repositorios; los tres existentes tienen un PR en borrador. Los ZIP de esta entrega contienen esa rama, no la versión anterior de `main`. Para actualizar la descarga del panel, copia el instalador 0.4.0 generado a `WOL_STATE_DIR/downloads/WoLPro-Agent-Setup.exe` (o la ruta que indique `WOL_AGENT_DOWNLOAD_PATH`), manteniendo los permisos de lectura del servicio. No fue publicado como Release ni instalado en tu PC durante la tarea.
+
 ## Respaldo antes de cambiar Azure
 
 Trabaja dentro de la carpeta `wakeonlan` que ya usa tu `wol.service`. Revisa su ruta y entorno con `sudo systemctl cat wol.service`. Usa el Python/venv configurado allí en los comandos siguientes.
