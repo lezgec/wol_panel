@@ -5,6 +5,8 @@ import json
 import os
 import time
 import uuid
+from zipfile import ZipFile
+from pathlib import Path
 from datetime import datetime, timezone
 from unittest.mock import patch
 import test_app as base
@@ -107,6 +109,44 @@ class AgentFlowTests(base.ApplicationTests):
         result = self.client.post('/api/agent/v1/heartbeat', headers=self.headers, json={'apps':[{'id':self.app_key,'name':'Spotify','path':'cmd.exe'}], 'allow_shutdown':True})
         self.assertEqual(result.status_code, 400)
         self.assertEqual(len(self.service.all('SELECT * FROM agent_apps')), 1)
+
+    def test_agent_download_requires_session_and_feature_and_serves_only_configured_file(self):
+        archive = Path(self.temp.name) / 'download-test.zip'
+        with ZipFile(archive, 'w') as package:
+            package.writestr('WolPro.Agent.exe', b'fixture-only-not-executable')
+        with patch.dict(self.module.app.config, WINDOWS_AGENT_DOWNLOAD_PATH=str(archive)):
+            anonymous = self.client.get('/windows/download')
+            self.assertEqual(anonymous.status_code, 302)
+            self.assertIn('/login', anonymous.location)
+            self.login()
+            page = self.client.get('/').get_data(as_text=True)
+            self.assertIn('Descargar agente para Windows', page)
+            response = self.client.get('/windows/download?path=auth.sqlite3')
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data, archive.read_bytes())
+            self.assertEqual(response.mimetype, 'application/zip')
+            self.assertIn('attachment;', response.headers['Content-Disposition'])
+            self.assertIn('WoLPro-Agent-win-x64.zip', response.headers['Content-Disposition'])
+            self.assertEqual(response.headers['Cache-Control'], 'no-store')
+            response.close()
+            partial = self.client.get('/windows/download', headers={'Range':'bytes=0-9'})
+            self.assertEqual(partial.status_code, 206)
+            self.assertEqual(partial.data, archive.read_bytes()[:10])
+            partial.close()
+            with patch.dict(self.module.app.config, ENABLE_WINDOWS_AGENT=False):
+                self.assertEqual(self.client.get('/windows/download').status_code, 404)
+                self.assertNotIn('Descargar agente para Windows', self.client.get('/').get_data(as_text=True))
+
+    def test_missing_agent_download_has_no_broken_button_or_server_path(self):
+        archive = Path(self.temp.name) / 'not-deployed.zip'
+        with patch.dict(self.module.app.config, WINDOWS_AGENT_DOWNLOAD_PATH=str(archive)):
+            self.login()
+            page = self.client.get('/').get_data(as_text=True)
+            self.assertIn('Descarga disponible próximamente', page)
+            self.assertNotIn('href="/windows/download"', page)
+            response = self.client.get('/windows/download')
+            self.assertEqual(response.status_code, 503)
+            self.assertNotIn(str(archive), response.get_data(as_text=True))
 
     def test_saved_console_command_uses_catalog_and_can_be_revoked_before_execution(self):
         self.pair()

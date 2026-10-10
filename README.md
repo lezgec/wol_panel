@@ -49,3 +49,5 @@ Más detalles en [TESTING.md](TESTING.md).
 El [agente Windows](https://github.com/lezgec/wolpro_agent) permite vincular un PC mediante tu cuenta, abrir aplicaciones, ejecutar comandos CMD/PowerShell guardados y autorizados en ese PC, y apagarlo con una cuenta atrás cancelable. En el mismo panel, pulsa **Añadir equipo** y expande una tarjeta para encender, modificar, vincular, gestionar acciones y consultar su historial. Alexa puede usar las mismas órdenes. Los comandos personalizados no usan la cuenta atrás del apagado integrado.
 
 Para activarlo en Azure, ejecuta `python migrate_db.py`, añade `ENABLE_WINDOWS_AGENT=1` al `.env` existente y reinicia tu servicio. Consulta los pasos en [WINDOWS_AGENT.md](WINDOWS_AGENT.md) y la [ampliación de la misma skill Alexa](alexa-custom/README.md).
+
+El botón **Descargar agente para Windows** sirve el ZIP desde Azure. Copia el descargable de la Release del repositorio del agente a `WOL_STATE_DIR/downloads/WoLPro-Agent-win-x64.zip`; el panel muestra el botón cuando el archivo está disponible. Los usuarios no necesitan acceso a GitHub.

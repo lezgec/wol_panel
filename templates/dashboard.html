@@ -40,7 +40,13 @@
                 {% if windows_agent_enabled %}
                 <section class="usage-note mt-4">
                     <h2 class="h6">Control de PC</h2>
-                    <p class="small text-secondary mb-0">Expande un equipo y vincúlalo con el agente de WoL Pro. Las aplicaciones y el permiso de apagado se autorizan en tu PC.</p>
+                    <p class="small text-secondary">Expande un equipo y vincúlalo con el agente de WoL Pro. Las aplicaciones, los comandos y el permiso de apagado se autorizan en tu PC.</p>
+                    {% if agent_download_ready %}
+                    <a href="{{ url_for('windows.download_agent') }}" class="btn btn-outline-success btn-sm">Descargar agente para Windows</a>
+                    <p class="small text-secondary mt-2 mb-0">Windows x64 · ZIP portátil. Descomprímelo y abre WolPro.Agent.exe en el PC que quieras controlar.</p>
+                    {% else %}
+                    <span class="status-badge">Descarga disponible próximamente</span>
+                    {% endif %}
                 </section>
                 {% endif %}
             </aside>

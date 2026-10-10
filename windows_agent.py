@@ -6,7 +6,8 @@ import secrets
 import time
 import uuid
 from urllib.parse import urlencode
-from flask import Blueprint, request, session, jsonify, redirect, url_for, flash
+from pathlib import Path
+from flask import Blueprint, request, session, jsonify, redirect, url_for, flash, send_file
 
 
 def digest(value):
@@ -241,7 +242,19 @@ def install(app, database, state_connection, rate_allowed, audit, render_dashboa
 
     @app.context_processor
     def feature_context():
-        return dict(windows_agent_enabled=app.config['ENABLE_WINDOWS_AGENT'])
+        return dict(windows_agent_enabled=app.config['ENABLE_WINDOWS_AGENT'],
+                    agent_download_ready=app.config['ENABLE_WINDOWS_AGENT'] and download_ready())
+
+    def download_path():
+        # Only server configuration selects the file; request arguments never select paths.
+        return Path(app.config['WINDOWS_AGENT_DOWNLOAD_PATH']).expanduser().resolve()
+
+    def download_ready():
+        try:
+            path = download_path()
+            return path.suffix.lower() == '.zip' and path.is_file() and path.stat().st_size > 0
+        except OSError:
+            return False
 
     @bp.before_request
     def guard():
@@ -280,6 +293,16 @@ def install(app, database, state_connection, rate_allowed, audit, render_dashboa
         if not auth.startswith('Bearer '):
             raise AgentError('unauthorized', 'Vincula este PC de nuevo.', 401)
         return service.authenticate(auth[7:])
+
+    @bp.get('/windows/download')
+    def download_agent():
+        if not download_ready():
+            return 'La descarga del agente todavía no está disponible. Inténtalo más tarde.', 503
+        try:
+            return send_file(download_path(), mimetype='application/zip', as_attachment=True,
+                             download_name='WoLPro-Agent-win-x64.zip', conditional=True, max_age=0)
+        except OSError:
+            return 'La descarga del agente no está disponible temporalmente.', 503
 
     @bp.post('/api/agent/v1/pair/start')
     def pair_start():

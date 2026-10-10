@@ -40,6 +40,7 @@ app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 from production_config import configure
 configure(app)
+app.config['WINDOWS_AGENT_DOWNLOAD_PATH'] = os.environ.get('WOL_AGENT_DOWNLOAD_PATH') or str(STATE_DIR / 'downloads' / 'WoLPro-Agent-win-x64.zip')
 
 @contextmanager
 def state_connection():
