@@ -1,0 +1,34 @@
+<dialog id="link-pc" class="panel-dialog" aria-labelledby="link-title" {{ 'data-auto-open' if show_link else '' }}>
+    <div class="dialog-heading"><h2 id="link-title" class="h5 mb-0">Vincular PC</h2><button type="button" class="dialog-close" data-close-dialog aria-label="Cerrar">×</button></div>
+    {% if pairing %}
+    <p>Confirma que el agente de <strong>{{ pairing.computer_name }}</strong> muestra este mismo código:</p>
+    <p class="pair-code">{{ pair_code }}</p>
+    <p class="small text-secondary">El acceso quedará asociado a tu cuenta. Las aplicaciones y el permiso de apagado se autorizan en tu PC.</p>
+    <form method="post" action="{{ url_for('windows.link') }}" data-pair-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="code" value="{{ pair_code }}">
+        <label for="pair-device" class="form-label">Equipo en tu cuenta</label>
+        <select id="pair-device" name="device_id" class="form-select mb-3">
+            {% for dev in devices %}
+            {% set existing = controls.get(dev[0]) %}
+            {% if not existing or not existing.active %}<option value="{{ dev[0] }}" {{ 'selected' if selected_device == dev[0] else '' }}>{{ dev[1] }}</option>{% endif %}
+            {% endfor %}
+            <option value="0" {{ 'selected' if not devices else '' }}>Registrar un equipo nuevo</option>
+        </select>
+        <div data-new-pc-fields>
+            <label for="pair-name" class="form-label">Nombre del equipo</label>
+            <input id="pair-name" name="name" maxlength="100" class="form-control mb-3" value="{{ pairing.computer_name }}">
+            <label for="pair-mac" class="form-label">Dirección MAC del PC</label>
+            <input id="pair-mac" name="mac" maxlength="17" class="form-control" placeholder="AA:BB:CC:DD:EE:FF">
+        </div>
+        <div class="dialog-actions"><button type="button" class="btn btn-outline-secondary" data-close-dialog>Cancelar</button><button class="btn btn-success">Autorizar este PC</button></div>
+    </form>
+    {% else %}
+    <p class="small text-secondary">Abre el agente de WoL Pro en tu PC y pulsa «Vincular cuenta». Introduce el código que muestra.</p>
+    <form method="get" action="{{ url_for('windows.link') }}" data-code-form>
+        <input type="hidden" name="device_id" value="">
+        <label for="link-code" class="form-label">Código temporal</label>
+        <input id="link-code" name="code" class="form-control font-monospace" maxlength="9" pattern="[A-Za-z2-9]{4}-[A-Za-z2-9]{4}" placeholder="ABCD-2345" required>
+        <div class="dialog-actions"><button type="button" class="btn btn-outline-secondary" data-close-dialog>Cancelar</button><button class="btn btn-success">Revisar código</button></div>
+    </form>
+    {% endif %}
+</dialog>

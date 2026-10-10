@@ -1,4 +1,4 @@
-"""Control de Windows. Cola MariaDB, autorización por PC y API sin cookies."""
+"""Control de PC. Cola MariaDB, autorización por PC y API sin cookies."""
 import hashlib
 import os
 import re
@@ -6,7 +6,7 @@ import secrets
 import time
 import uuid
 from urllib.parse import urlencode
-from flask import Blueprint, request, session, jsonify, render_template, redirect, url_for, flash
+from flask import Blueprint, request, session, jsonify, redirect, url_for, flash
 
 
 def digest(value):
@@ -214,7 +214,27 @@ class AgentService:
         return dict(status=status)
 
 
-def install(app, database, state_connection, rate_allowed, audit):
+    def dashboard_data(self, user):
+        now = int(time.time())
+        agents = self.all('SELECT a.id,a.device_id,a.last_seen,a.allow_shutdown,a.expires,a.revoked,d.name FROM agent_connections a JOIN devices d ON d.id=a.device_id WHERE a.user_id=%s', (user,))
+        apps = self.all('SELECT p.agent_id,p.app_key,p.name FROM agent_apps p JOIN agent_connections a ON a.id=p.agent_id WHERE a.user_id=%s AND a.revoked=0 ORDER BY p.name', (user,))
+        actions = self.all('SELECT x.* FROM agent_actions x JOIN agent_connections a ON a.id=x.agent_id WHERE x.user_id=%s AND a.revoked=0 ORDER BY x.name', (user,))
+        self.db.execute('UPDATE agent_commands SET status=%s,result=%s WHERE user_id=%s AND status=%s AND expires<=%s', ('expired', 'expired', user, 'pending', now))
+        self.db.execute('UPDATE agent_commands SET status=%s,result=%s WHERE user_id=%s AND status IN (%s,%s) AND expires<%s', ('uncertain', 'uncertain', user, 'claimed', 'scheduled', now-120))
+        commands = self.all('SELECT q.* FROM agent_commands q JOIN agent_connections a ON a.id=q.agent_id JOIN devices d ON d.id=a.device_id WHERE q.user_id=%s ORDER BY q.created DESC,q.id DESC LIMIT 30', (user,))
+        result = {}
+        for pc in agents:
+            pc['online'] = not pc['revoked'] and pc['expires'] > now and pc['last_seen'] >= now-20
+            pc['active'] = not pc['revoked'] and pc['expires'] > now
+            pc['apps'] = [item for item in apps if item['agent_id'] == pc['id']]
+            pc['actions'] = [item for item in actions if item['agent_id'] == pc['id']]
+            pc['commands'] = [item for item in commands if item['agent_id'] == pc['id']]
+            pc['nonce'] = secrets.token_urlsafe(24)
+            result[pc['device_id']] = pc
+        return result
+
+
+def install(app, database, state_connection, rate_allowed, audit, render_dashboard):
     service = AgentService(database)
     bp = Blueprint('windows', __name__)
     app.config['ENABLE_WINDOWS_AGENT'] = os.environ.get('ENABLE_WINDOWS_AGENT', '0') == '1'
@@ -226,7 +246,7 @@ def install(app, database, state_connection, rate_allowed, audit):
     @bp.before_request
     def guard():
         if not app.config['ENABLE_WINDOWS_AGENT']:
-            return jsonify(error='disabled', message='Control Windows no habilitado.'), 404
+            return jsonify(error='disabled', message='Control de PC no habilitado.'), 404
         if request.path.startswith('/windows') and 'user_id' not in session:
             if request.path == '/windows/link':
                 session['agent_return'] = '/windows/link?' + urlencode({'code': request.args.get('code', '')[:20]})
@@ -241,7 +261,7 @@ def install(app, database, state_connection, rate_allowed, audit):
     def error(exc):
         if request.path.startswith('/windows'):
             flash(exc.message, 'warning')
-            return redirect(url_for('windows.link') if request.path == '/windows/link' else url_for('windows.panel'))
+            return redirect(url_for('windows.link')) if request.path == '/windows/link' else panel_return()
         return jsonify(error=exc.code, message=exc.message), exc.status
 
     def body():
@@ -249,6 +269,11 @@ def install(app, database, state_connection, rate_allowed, audit):
         if not isinstance(data, dict):
             raise AgentError('invalid_json', 'Petición inválida.')
         return data
+
+    def panel_return():
+        device_id = request.form.get('return_device', '')
+        anchor = 'pc-' + device_id if device_id.isascii() and device_id.isdigit() and len(device_id) <= 10 else None
+        return redirect(url_for('index', _anchor=anchor))
 
     def agent():
         auth = request.headers.get('Authorization', '')
@@ -315,20 +340,13 @@ def install(app, database, state_connection, rate_allowed, audit):
                 raise AgentError('invalid_input', 'Selecciona un equipo.') from None
             service.authorize(code, session['user_id'], device_id, request.form.get('name', ''), request.form.get('mac', ''))
             audit(session['user_id'], 'AGENT_LINK', 'PC autorizado mediante código temporal')
-            return render_template('agent_link.html', code=code, complete=True, pairing=None, devices=[])
-        devices = database.fetch_all('SELECT id,name FROM devices WHERE user_sub=%s', (session['user_id'],))
-        return render_template('agent_link.html', code=code, pairing=pairing, devices=devices, complete=False)
+            return render_dashboard(link_complete=True)
+        selected = request.args.get('device_id', type=int)
+        return render_dashboard(show_link=True, pair_code=code, pairing=pairing, selected_device=selected)
 
     @bp.get('/windows')
     def panel():
-        user = session['user_id']
-        agents = service.all('SELECT a.id,a.device_id,a.last_seen,a.allow_shutdown,a.expires,a.revoked,d.name FROM agent_connections a JOIN devices d ON d.id=a.device_id WHERE a.user_id=%s', (user,))
-        apps = service.all('SELECT p.agent_id,p.app_key,p.name FROM agent_apps p JOIN agent_connections a ON a.id=p.agent_id WHERE a.user_id=%s AND a.revoked=0', (user,))
-        actions = service.all('SELECT x.*,d.name AS computer_name FROM agent_actions x JOIN agent_connections a ON a.id=x.agent_id JOIN devices d ON d.id=a.device_id WHERE x.user_id=%s AND a.revoked=0', (user,))
-        database.execute('UPDATE agent_commands SET status=%s,result=%s WHERE user_id=%s AND status=%s AND expires<=%s', ('expired', 'expired', user, 'pending', int(time.time())))
-        database.execute('UPDATE agent_commands SET status=%s,result=%s WHERE user_id=%s AND status IN (%s,%s) AND expires<%s', ('uncertain', 'uncertain', user, 'claimed', 'scheduled', int(time.time())-120))
-        commands = service.all('SELECT q.*,d.name AS computer_name FROM agent_commands q JOIN agent_connections a ON a.id=q.agent_id JOIN devices d ON d.id=a.device_id WHERE q.user_id=%s ORDER BY q.created DESC LIMIT 30', (user,))
-        return render_template('agent_panel.html', agents=agents, apps=apps, actions=actions, commands=commands, now=int(time.time()), nonce=secrets.token_urlsafe(24))
+        return render_dashboard()
 
     @bp.post('/windows/agents/<agent_id>/revoke')
     def revoke(agent_id):
@@ -338,7 +356,7 @@ def install(app, database, state_connection, rate_allowed, audit):
         database.execute('UPDATE agent_commands SET cancel_requested=1 WHERE agent_id=%s AND status IN (%s,%s,%s)', (agent_id, 'pending', 'claimed', 'scheduled'))
         audit(session['user_id'], 'AGENT_REVOKE', 'Acceso de PC revocado')
         flash('PC desvinculado.', 'success')
-        return redirect(url_for('windows.panel'))
+        return panel_return()
 
     @bp.post('/windows/actions')
     def create_action():
@@ -357,7 +375,7 @@ def install(app, database, state_connection, rate_allowed, audit):
             raise AgentError('duplicate_name', 'Ya existe una acción con ese nombre.')
         database.execute('INSERT INTO agent_actions (id,user_id,agent_id,name,kind,app_key) VALUES (%s,%s,%s,%s,%s,%s)', (str(uuid.uuid4()), user, agent_id, name, kind, key))
         flash('Acción creada.', 'success')
-        return redirect(url_for('windows.panel'))
+        return panel_return()
 
     @bp.post('/windows/actions/<action_id>/run')
     def run_action(action_id):
@@ -367,12 +385,12 @@ def install(app, database, state_connection, rate_allowed, audit):
         command_id = service.execute_action(session['user_id'], action_id, 'web:'+action_id+':'+nonce)
         audit(session['user_id'], 'AGENT_COMMAND', 'Orden Windows '+command_id)
         flash('Orden enviada. Consulta el resultado en el historial.', 'success')
-        return redirect(url_for('windows.panel'))
+        return panel_return()
 
     @bp.post('/windows/actions/<action_id>/delete')
     def delete_action(action_id):
         database.execute('DELETE FROM agent_actions WHERE id=%s AND user_id=%s', (action_id, session['user_id']))
-        return redirect(url_for('windows.panel'))
+        return panel_return()
 
     @bp.post('/windows/commands/<command_id>/cancel')
     def cancel_command(command_id):
@@ -383,7 +401,7 @@ def install(app, database, state_connection, rate_allowed, audit):
             c.execute('UPDATE agent_commands SET cancel_requested=1 WHERE id=%s AND status IN (%s,%s,%s)', (command_id, 'pending', 'claimed', 'scheduled'))
             c.execute('UPDATE agent_commands SET status=%s,result=%s WHERE id=%s AND status=%s', ('cancelled', 'cancelled', command_id, 'pending'))
         flash('Cancelación solicitada. Si la acción ya se ejecutó, no puede deshacerse.', 'info')
-        return redirect(url_for('windows.panel'))
+        return panel_return()
 
     from alexa_windows import register_custom
     register_custom(bp, service, state_connection, rate_allowed, audit)

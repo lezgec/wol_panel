@@ -1,163 +1,109 @@
+{% from '_device_fields.html' import device_fields with context %}
 <!DOCTYPE html>
 <html lang="es" data-bs-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Panel - WoL Pro</title>
+    <title>Panel · WoL Pro</title>
     {% include "_icons.html" %}
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+    <script src="{{ url_for('static', filename='dashboard.js') }}" defer></script>
 </head>
-<body class="bg-body-secondary">
-    {% for category, message in get_flashed_messages(with_categories=true) %}
-    <div class="alert alert-{{ category }} m-3" role="alert">{{ message }}</div>
-    {% endfor %}
-    <nav class="navbar navbar-expand-lg bg-body border-bottom px-4">
-        <a class="navbar-brand d-flex align-items-center gap-2 text-decoration-none" href="/">
-            <img src="{{ url_for('static', filename='images/wol-pro-icon.png') }}" alt="" width="40" height="40" class="rounded-3">
-            <span class="fw-bold fs-5 text-body">WoL<span class="text-success fw-normal">Pro</span></span>
+<body>
+    <nav class="topbar">
+        <a class="brand" href="{{ url_for('index') }}">
+            <img src="{{ url_for('static', filename='images/wol-pro-icon.png') }}" alt="" width="40" height="40">
+            <span>WoL<span class="brand-accent">Pro</span></span>
         </a>
-        <div class="ms-auto d-flex align-items-center gap-3">
-            {% if windows_agent_enabled %}<a href="{{ url_for('windows.panel') }}" class="btn btn-outline-success btn-sm">Control Windows</a>{% endif %}
+        <div class="d-flex align-items-center gap-3">
             <span class="text-secondary small d-none d-md-inline">{{ email }}</span>
-            <a href="/logout" class="btn btn-outline-danger btn-sm"><i class="fa-solid fa-power-off me-1"></i> Salir</a>
+            <a href="{{ url_for('logout') }}" class="btn btn-outline-secondary btn-sm">Salir</a>
         </div>
     </nav>
-
-    <div class="container py-5">
-        <div class="row g-4">
-            <!-- Formulario para agregar dispositivo -->
-            <div class="col-md-4">
-                <div class="card bg-body border shadow-sm p-4">
-                    <h5 class="fw-bold mb-3"><i class="fa-solid fa-desktop me-2 text-primary"></i>Añadir Equipo</h5>
-                    <p class="text-secondary small">Guarda tu equipo y elige cómo quieres encenderlo.</p>
-                    <form action="/add" method="POST" data-wake-form>
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <div class="mb-3">
-                            <label for="device-name" class="form-label small fw-semibold">Nombre del Dispositivo</label>
-                            <input id="device-name" type="text" name="name" class="form-control" placeholder="Ej. PC Escritorio" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="device-mac" class="form-label small fw-semibold">Dirección MAC</label>
-                            <input id="device-mac" type="text" name="mac" class="form-control" placeholder="XX:XX:XX:XX:XX:XX" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="wake-method" class="form-label small fw-semibold">Método de encendido</label>
-                            <select id="wake-method" name="wake_method" class="form-select">
-                                <option value="alexa">Alexa · Echo en casa</option>
-                                <option value="router">Router por Internet</option>
-                                {% if allow_local %}<option value="local">Red local del servidor</option>{% endif %}
-                            </select>
-                        </div>
-                        <div data-router-fields class="mb-3" hidden>
-                            <label for="wake-host" class="form-label small">IP pública o dominio DDNS del router</label>
-                            <input id="wake-host" name="wake_host" class="form-control mb-2" placeholder="casa.ejemplo.net" maxlength="253">
-                            <label for="wake-port" class="form-label small">Puerto UDP externo</label>
-                            <input id="wake-port" name="wake_port" type="number" min="1" max="65535" value="9" class="form-control">
-                            <p class="form-text">El router debe tener Wake-on-WAN configurado previamente y una conexión pública accesible. Esta app no cambia su configuración.</p>
-                        </div>
-                        <p data-method-note class="text-secondary small"></p>
-                        <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold">
-                            <i class="fa-solid fa-plus me-1"></i> Registrar Dispositivo
-                        </button>
-                    </form>
+    <main class="container panel-shell">
+        {% for category, message in get_flashed_messages(with_categories=true) %}<div class="alert alert-{{ category }}" role="alert">{{ message }}</div>{% endfor %}
+        {% if link_complete %}<div class="alert alert-success" role="status">PC autorizado. Vuelve al agente de WoL Pro en tu PC: completará la vinculación automáticamente.</div>{% endif %}
+        <div class="row g-4 g-xl-5">
+            <aside class="col-md-4">
+                <div class="workspace-intro">
+                    <span class="eyebrow">TU ESPACIO WOL PRO</span>
+                    <h1>Tus equipos.<br> En un solo lugar.</h1>
+                    <p class="text-secondary">Enciende tus equipos y{% if windows_agent_enabled %} controla tu PC{% else %} gestiona su configuración{% endif %} desde este panel.</p>
+                    <button type="button" class="btn btn-success add-button" data-open-dialog="add-device"><span aria-hidden="true">＋</span> Añadir equipo</button>
+                    <p class="small text-secondary mt-3">Selecciona un equipo para ver sus opciones.</p>
                 </div>
-                <div class="card bg-body border shadow-sm p-3 mt-3">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <span class="fw-semibold">Control con Alexa</span>
-                        <span class="badge {{ 'text-bg-success' if alexa_ready else 'text-bg-secondary' }}">{{ 'Cuenta vinculada' if alexa_ready else 'Sin vincular' }}</span>
-                    </div>
-                    <p class="text-secondary small mb-0 mt-2">Vincula tu cuenta en la skill desde la app Alexa y descubre tus equipos. El Echo debe estar en la misma red que la PC. Si cambias el método o la MAC, vuelve a descubrir los dispositivos.</p>
+                <section class="alexa-card mt-4" aria-labelledby="alexa-title">
+                    <div class="section-heading"><h2 id="alexa-title" class="h6 mb-0">Alexa</h2><span class="status-badge {{ 'is-online' if alexa_ready else '' }}">{{ 'Cuenta vinculada' if alexa_ready else 'Sin vincular' }}</span></div>
+                    <p class="small text-secondary mb-0">Vincula tu cuenta en la skill WoL Pro desde la app Alexa y descubre tus equipos. Para encender con Echo, debe estar en la misma red que tu PC.</p>
+                </section>
+                {% if windows_agent_enabled %}
+                <section class="usage-note mt-4">
+                    <h2 class="h6">Control de PC</h2>
+                    <p class="small text-secondary mb-0">Expande un equipo y vincúlalo con el agente de WoL Pro. Las aplicaciones y el permiso de apagado se autorizan en tu PC.</p>
+                </section>
+                {% endif %}
+            </aside>
+            <section class="col-md-8" aria-labelledby="devices-title">
+                <div class="section-heading devices-heading">
+                    <h2 id="devices-title" class="h5 mb-0">Mis equipos <span class="device-count">{{ devices|length }}</span></h2>
+                    <a href="{{ url_for('index') }}" class="refresh-link">Actualizar</a>
                 </div>
-            </div>
-
-            <!-- Listado de dispositivos -->
-            <div class="col-md-8">
-                <div class="card bg-body border shadow-sm p-4">
-                    <h5 class="fw-bold mb-3"><i class="fa-solid fa-server me-2 text-success"></i>Tus Computadoras</h5>
-                    {% if devices %}
-                        <div class="table-responsive">
-                            <table class="table table-hover align-middle">
-                                <thead>
-                                    <tr>
-                                        <th>Nombre</th>
-                                        <th>MAC</th>
-                                        <th>Método</th>
-                                        <th class="text-end">Acciones</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for dev in devices %}
-                                    <tr>
-                                        <td class="fw-semibold">{{ dev[1] }}</td>
-                                        <td><code>{{ dev[2] }}</code></td>
-                                        <td>
-                                            <span class="badge text-bg-secondary">{{ {'local': 'Red local', 'router': 'Router', 'alexa': 'Alexa / Echo'}.get(dev[3], 'Red local') }}</span>
-                                            {% if dev[3] == 'router' %}<div class="small text-secondary mt-1">{{ dev[4] }}:{{ dev[5] }}</div>{% endif %}
-                                            {% if dev[3] == 'local' and not allow_local %}<div class="small text-warning mt-1">Selecciona Alexa o Router para encender desde Internet.</div>{% endif %}
-                                            <details class="mt-2">
-                                                <summary class="small">Cambiar método</summary>
-                                                <form action="{{ url_for('update_device_settings', device_id=dev[0]) }}" method="POST" data-wake-form class="mt-2">
-                                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                                    <label for="method-{{ dev[0] }}" class="small">Método de encendido</label>
-                                                    <select id="method-{{ dev[0] }}" name="wake_method" class="form-select form-select-sm mb-2">
-                                                        {% for value, label in [('alexa', 'Alexa · Echo en casa'), ('router', 'Router por Internet'), ('local', 'Red local del servidor')] %}
-                                                        {% if value != 'local' or allow_local %}
-                                                        <option value="{{ value }}" {{ 'selected' if dev[3] == value else '' }}>{{ label }}</option>
-                                                        {% endif %}
-                                                        {% endfor %}
-                                                    </select>
-                                                    <div data-router-fields {{ 'hidden' if dev[3] != 'router' else '' }}>
-                                                        <label for="host-{{ dev[0] }}" class="small">IP pública / DDNS</label>
-                                                        <input id="host-{{ dev[0] }}" name="wake_host" class="form-control form-control-sm mb-2" value="{{ dev[4] or '' }}" maxlength="253">
-                                                        <label for="port-{{ dev[0] }}" class="small">Puerto UDP externo</label>
-                                                        <input id="port-{{ dev[0] }}" name="wake_port" type="number" min="1" max="65535" class="form-control form-control-sm mb-2" value="{{ dev[5] }}">
-                                                    </div>
-                                                    <p data-method-note class="small text-secondary"></p>
-                                                    <button class="btn btn-outline-primary btn-sm">Guardar método</button>
-                                                </form>
-                                            </details>
-                                        </td>
-                                        <td class="text-end">
-                                            <form action="{{ url_for('wake_device', device_id=dev[0]) }}" method="POST" class="d-inline">
-                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                                <button class="btn {{ 'btn-outline-info' if dev[3] == 'alexa' else 'btn-success' }} btn-sm me-1"><i class="fa-solid fa-bolt"></i> {{ 'Cómo encender' if dev[3] == 'alexa' else 'Encender' }}</button>
-                                            </form>
-                                            <form action="{{ url_for('delete_device', device_id=dev[0]) }}" method="POST" class="d-inline">
-                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                                <button class="btn btn-outline-danger btn-sm" title="Eliminar" aria-label="Eliminar equipo"><i class="fa-solid fa-trash"></i></button>
-                                            </form>
-                                        </td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
+                <div class="device-list">
+                    {% for dev in devices %}
+                    {% set pc = controls.get(dev[0]) %}
+                    <details class="device-card" id="pc-{{ dev[0] }}" data-device-card>
+                        <summary class="device-summary">
+                            <span class="computer-icon" aria-hidden="true">▣</span>
+                            <span class="device-identity"><strong>{{ dev[1] }}</strong><span class="device-meta">{{ dev[2] }} · {{ {'local':'Red local','router':'Router','alexa':'Alexa / Echo'}.get(dev[3], 'Red local') }}</span></span>
+                            {% if windows_agent_enabled %}<span class="status-badge {{ 'is-online' if pc and pc.online else '' }}">{{ 'Agente conectado' if pc and pc.online else ('Agente desconectado' if pc and pc.active else 'Sin vincular') }}</span>{% endif %}
+                            <span class="expand-icon" aria-hidden="true">＋</span>
+                        </summary>
+                        <div class="device-content">
+                            <section class="pc-section pt-0" aria-labelledby="wake-title-{{ dev[0] }}">
+                                <div class="section-heading">
+                                    <h3 id="wake-title-{{ dev[0] }}" class="h6 mb-0">Encendido</h3>
+                                    <form method="post" action="{{ url_for('wake_device', device_id=dev[0]) }}">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <button class="btn btn-success btn-sm">{{ 'Cómo encender con Alexa' if dev[3] == 'alexa' else 'Encender equipo' }}</button>
+                                    </form>
+                                </div>
+                                <p class="small text-secondary mb-0">{% if dev[3] == 'alexa' %}Di «Alexa, enciende {{ dev[1] }}» o usa la app Alexa.{% elif dev[3] == 'router' %}Paquete UDP a {{ dev[4] }}:{{ dev[5] }} mediante tu router configurado.{% else %}El servidor debe estar en la misma red que tu PC.{% endif %}</p>
+                            </section>
+                            {% if windows_agent_enabled %}{% include '_pc_controls.html' %}{% endif %}
+                            <section class="pc-section">
+                                <details class="settings-fold">
+                                    <summary>Modificar equipo</summary>
+                                    <form method="post" action="{{ url_for('edit_device', device_id=dev[0]) }}" data-wake-form class="mt-3">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        {{ device_fields(dev[0], dev) }}
+                                        <button class="btn btn-success btn-sm mt-3">Guardar cambios</button>
+                                    </form>
+                                </details>
+                                <form method="post" action="{{ url_for('delete_device', device_id=dev[0]) }}" class="mt-4" data-confirm="¿Eliminar este equipo? También se eliminarán su vinculación, sus acciones y su historial.">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button class="btn btn-outline-danger btn-sm">Eliminar equipo</button>
+                                </form>
+                            </section>
                         </div>
+                    </details>
                     {% else %}
-                        <p class="text-secondary text-center py-4 my-0">No tienes dispositivos registrados todavía. ¡Añade uno a la izquierda!</p>
-                    {% endif %}
+                    <div class="empty-devices"><span class="empty-icon" aria-hidden="true">▣</span><h3 class="h5">Tu primer equipo empieza aquí</h3><p class="text-secondary small">Añade su nombre y dirección MAC para empezar.</p><button class="btn btn-outline-success" type="button" data-open-dialog="add-device">Añadir equipo</button></div>
+                    {% endfor %}
                 </div>
-            </div>
+            </section>
         </div>
-    </div>
-    <script>
-        document.querySelectorAll('[data-wake-form]').forEach(form => {
-            const select = form.querySelector('[name="wake_method"]');
-            const fields = form.querySelector('[data-router-fields]');
-            const note = form.querySelector('[data-method-note]');
-            function update() {
-                const router = select.value === 'router';
-                fields.hidden = !router;
-                fields.querySelectorAll('input').forEach(input => { input.disabled = !router; input.required = router; });
-                note.textContent = select.value === 'alexa'
-                    ? 'Encendido desde la app Alexa o por voz. No requiere otro servidor en casa.'
-                    : select.value === 'local'
-                    ? 'Solo funciona cuando el servidor de esta web está en la red de la PC.'
-                    : 'Encendido desde esta web usando el destino y el puerto de tu router.';
-            }
-            select.addEventListener('change', update);
-            update();
-        });
-    </script>
+    </main>
+    <dialog id="add-device" class="panel-dialog" aria-labelledby="add-title">
+        <div class="dialog-heading"><h2 id="add-title" class="h5 mb-0">Añadir equipo</h2><button type="button" class="dialog-close" data-close-dialog aria-label="Cerrar">×</button></div>
+        <p class="small text-secondary">Guarda tu equipo y elige cómo quieres encenderlo.</p>
+        <form method="post" action="{{ url_for('add_device') }}" data-wake-form>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            {{ device_fields('new') }}
+            <div class="dialog-actions"><button class="btn btn-outline-secondary" type="button" data-close-dialog>Cancelar</button><button class="btn btn-success">Añadir equipo</button></div>
+        </form>
+    </dialog>
+    {% if windows_agent_enabled %}{% include '_pc_link_dialog.html' %}{% endif %}
+    <footer class="container panel-footer">WoL Pro <span>·</span> <a href="{{ url_for('privacy_policy') }}">Privacidad</a></footer>
 </body>
 </html>

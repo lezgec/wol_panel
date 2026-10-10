@@ -58,6 +58,27 @@ class AgentFlowTests(base.ApplicationTests):
     def command(self, kind='launch', dedupe=None):
         return self.service.enqueue(1, self.credentials['agent_id'], kind, self.app_key if kind=='launch' else None, dedupe or str(uuid.uuid4()))
 
+    def test_agent_dashboard_groups_controls_and_preserves_link_on_edit(self):
+        self.pair()
+        action_id = str(uuid.uuid4())
+        self.module.database.execute('INSERT INTO agent_actions (id,user_id,agent_id,name,kind,app_key) VALUES (%s,%s,%s,%s,%s,%s)',
+                                    (action_id, 1, self.agent['id'], 'Spotify en mi PC', 'launch', self.app_key))
+        self.module.database.execute('INSERT INTO devices (id,name,mac,user_sub) VALUES (%s,%s,%s,%s)', (3, 'Segundo PC', '12:34:56:78:9A:BC', '1'))
+        self.client.post('/devices/1/edit', data=dict(name='PC Renombrado', mac='12:34:56:78:9A:BD', wake_method='alexa', csrf_token=self.csrf()))
+        data = self.service.dashboard_data(1)
+        self.assertEqual(set(data), {1})
+        self.assertEqual(data[1]['id'], self.agent['id'])
+        self.assertEqual(data[1]['actions'][0]['id'], action_id)
+        self.assertEqual(data[1]['apps'][0]['app_key'], self.app_key)
+        self.assertEqual(self.service.dashboard_data(2), {})
+        page = self.client.get('/')
+        self.assertIn(b'PC Renombrado', page.data)
+        self.assertIn(b'Spotify en mi PC', page.data)
+        self.assertNotIn(b'PC ajena', page.data)
+        response = self.client.post('/windows/actions/'+action_id+'/run', data=dict(csrf_token=self.csrf(), nonce='from-card', return_device='1'))
+        self.assertEqual(response.location, '/#pc-1')
+        self.assertEqual(len(self.service.dashboard_data(1)[1]['commands']), 1)
+
     def test_agent_pair_bound_to_owner_and_one_use(self):
         self.pair()
         stored = self.module.database.fetch_one('SELECT token_hash FROM agent_connections')

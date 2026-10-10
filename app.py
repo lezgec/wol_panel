@@ -73,7 +73,7 @@ def rate_allowed(bucket, identity, limit, seconds):
 
 REQUEST_LIMITS = {'login': (15, 60), 'oauth_authorize': (15, 60), 'oauth_token': (120, 60),
                   'register': (5, 900), 'forgot_password': (5, 900), 'wake_device': (12, 60),
-                  'add_device': (30, 60), 'update_device_settings': (30, 60), 'mobile_wake': (12, 60),
+                  'add_device': (30, 60), 'update_device_settings': (30, 60), 'edit_device': (30, 60), 'mobile_wake': (12, 60),
                   'mobile_create_device': (30, 60), 'mobile_update_device': (30, 60)}
 
 def create_challenge(email, purpose, code):
@@ -325,6 +325,14 @@ def send_router_wol(mac, host, port):
 
 # ================= WEB ROUTES =================
 
+def render_dashboard(**context):
+    user_id = session['user_id']
+    devices = database.fetch_all('SELECT id, name, mac, wake_method, wake_host, wake_port FROM devices WHERE user_sub = %s ORDER BY id', (str(user_id),))
+    controls = agent_service.dashboard_data(user_id) if app.config['ENABLE_WINDOWS_AGENT'] else {}
+    return render_template('dashboard.html', devices=devices, email=session.get('email'),
+                           alexa_ready=alexa_gateway.is_linked(str(user_id)),
+                           allow_local=app.config['ALLOW_LOCAL_WOL'], controls=controls, **context)
+
 @app.route('/')
 def index():
     if 'user_id' not in session:
@@ -333,10 +341,7 @@ def index():
     if agent_return.startswith('/windows/link?'):
         return redirect(agent_return)
     
-    user_id = session['user_id']
-    devices = database.fetch_all('SELECT id, name, mac, wake_method, wake_host, wake_port FROM devices WHERE user_sub = %s', (str(user_id),))
-    
-    return render_template('dashboard.html', devices=devices, email=session.get('email'), alexa_ready=alexa_gateway.is_linked(str(user_id)), allow_local=app.config['ALLOW_LOCAL_WOL'])
+    return render_dashboard()
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -679,7 +684,7 @@ def wake_device(device_id):
         return redirect(url_for('login'))
     result, _ = wake_result(device_id, session['user_id'])
     flash(result['message'], result['category'])
-    return redirect(url_for('index'))
+    return redirect(url_for('index', _anchor=f'pc-{device_id}'))
 
 @app.route('/devices/<int:device_id>/settings', methods=['POST'])
 def update_device_settings(device_id):
@@ -694,6 +699,29 @@ def update_device_settings(device_id):
                              (method, host, port, device_id, str(session['user_id'])))
     flash('Método de encendido guardado.' if count else 'Equipo no encontrado.', 'success' if count else 'danger')
     return redirect(url_for('index'))
+
+@app.post('/devices/<int:device_id>/edit')
+def edit_device(device_id):
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    owner = str(session['user_id'])
+    if not database.fetch_one('SELECT id FROM devices WHERE id=%s AND user_sub=%s', (device_id, owner)):
+        flash('Equipo no encontrado.', 'danger')
+        return redirect(url_for('index'))
+    try:
+        name = request.form.get('name', '').strip()
+        if not name or len(name) > 100:
+            raise ValueError('Introduce un nombre de entre 1 y 100 caracteres.')
+        mac = normalize_mac(request.form.get('mac', ''))
+        method, host, port = wake_settings(request.form)
+    except ValueError as error:
+        flash(str(error), 'danger')
+    else:
+        database.execute('UPDATE devices SET name=%s,mac=%s,wake_method=%s,wake_host=%s,wake_port=%s WHERE id=%s AND user_sub=%s',
+                         (name, mac, method, host, port, device_id, owner))
+        log_action(session['user_id'], 'UPDATE_DEVICE', f'Equipo actualizado: {name} ({mac})')
+        flash('Equipo actualizado. Si usas Alexa, vuelve a descubrir los dispositivos.', 'success')
+    return redirect(url_for('index', _anchor=f'pc-{device_id}'))
 
 @app.route('/delete/<int:device_id>', methods=['POST'])
 def delete_device(device_id):
@@ -922,7 +950,7 @@ def alexa_smarthome():
     return alexa_error(directive, 'INVALID_DIRECTIVE', 'Directiva no compatible.')
 
 from windows_agent import install as install_windows_agent
-agent_service = install_windows_agent(app, database, state_connection, rate_allowed, log_action)
+agent_service = install_windows_agent(app, database, state_connection, rate_allowed, log_action, render_dashboard)
 
 if __name__ == '__main__':
     from waitress import serve

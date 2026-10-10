@@ -256,6 +256,28 @@ class ApplicationTests(unittest.TestCase):
             self.assertFalse(self.real_send_wol('GG:BB:CC:DD:EE:FF'))
             send.assert_not_called()
 
+    def test_panel_edit_requires_csrf_and_ownership(self):
+        self.login()
+        fields = dict(name='Nuevo nombre', mac='12:34:56:78:9A:BC', wake_method='alexa')
+        self.assertEqual(self.client.post('/devices/1/edit', data=fields).status_code, 400)
+        fields['csrf_token'] = self.csrf()
+        self.client.post('/devices/2/edit', data=fields)
+        self.assertEqual(self.module.database.fetch_one('SELECT name,mac FROM devices WHERE id=2'),
+                         ('PC ajena', '11:22:33:44:55:66'))
+        for _ in range(2):
+            response = self.client.post('/devices/1/edit', data=fields, follow_redirects=True)
+            self.assertIn('Equipo actualizado.'.encode(), response.data)
+        self.assertEqual(self.module.database.fetch_one('SELECT name,mac,wake_method FROM devices WHERE id=1'),
+                         ('Nuevo nombre', '12:34:56:78:9A:BC', 'alexa'))
+
+    def test_panel_invalid_edit_is_atomic(self):
+        self.login()
+        initial = self.module.database.fetch_one('SELECT name,mac,wake_method,wake_host,wake_port FROM devices WHERE id=1')
+        fields = dict(name='Cambio', mac='12:34:56:78:9A:BC', wake_method='alexa', csrf_token=self.csrf())
+        for invalid in ({'name': ''}, {'mac': 'invalid'}, {'wake_method': 'router', 'wake_host': '127.0.0.1'}):
+            self.client.post('/devices/1/edit', data={**fields, **invalid})
+            self.assertEqual(self.module.database.fetch_one('SELECT name,mac,wake_method,wake_host,wake_port FROM devices WHERE id=1'), initial)
+
     def test_panel_login_dashboard_and_wake(self):
         self.assertEqual(self.login().status_code, 302)
         page = self.client.get('/')

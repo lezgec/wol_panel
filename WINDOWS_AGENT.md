@@ -1,4 +1,4 @@
-# Control Windows y actualización manual
+# Control de PC y actualización manual
 
 El agente [wolpro_agent](https://github.com/lezgec/wolpro_agent) abre aplicaciones autorizadas y permite apagar el PC con una cuenta atrás cancelable de 30 segundos. Funciona en la sesión de Windows; necesita estar abierto y tener Internet. Se conecta por HTTPS al servidor cada cinco segundos. No necesita puertos entrantes en casa. El encendido sigue usando la integración WoL existente.
 
@@ -20,7 +20,7 @@ ENABLE_WINDOWS_AGENT=1
 ALEXA_SKILL_ID=
 ```
 
-Reinicia **el servicio que ya utilizas para WoL Pro**. El control Windows aparecerá en el panel. Conserva el endpoint `/alexa/smarthome`. Para ampliar Alexa, actualiza el código de su Lambda existente como se indica abajo. Si necesitas desactivar el nuevo control, vuelve a `ENABLE_WINDOWS_AGENT=0` y reinicia; no elimines tablas.
+Reinicia **el servicio que ya utilizas para WoL Pro**. El Control de PC aparecerá al expandir un equipo del panel. Conserva el endpoint `/alexa/smarthome`. Para ampliar Alexa, actualiza el código de su Lambda existente como se indica abajo. Si necesitas desactivar el nuevo control, vuelve a `ENABLE_WINDOWS_AGENT=0` y reinicia; no elimines tablas.
 
 ## Vincular y crear órdenes
 
@@ -28,7 +28,9 @@ Reinicia **el servicio que ya utilizas para WoL Pro**. El control Windows aparec
 2. Pulsa **Vincular cuenta**. El navegador abre `/windows/link` con un código público temporal de cinco minutos. Inicia sesión o crea/verifica tu cuenta en el acceso web existente.
 3. Confirma el código y selecciona un equipo de tu cuenta, o registra uno con nombre y MAC. La credencial privada llega directamente al agente, se guarda con DPAPI para tu usuario Windows y caduca a los 90 días; entonces vuelve a vincular.
 4. Autoriza aplicaciones desde Windows con **Añadir .exe** o **Añadir Spotify**. Spotify debe estar instalado y tener registrado su protocolo. Los ejecutables se abren sin argumentos adicionales. Para apagar, activa el permiso local específico.
-5. En **Control Windows**, crea una acción con nombre único (por ejemplo «Spotify en mi PC»), PC y aplicación. Puedes ejecutarla desde el navegador, consultar el resultado y cancelar órdenes pendientes o la cuenta atrás.
+5. En el panel, expande la tarjeta de tu equipo. En **Control de PC**, pulsa **Crear una acción** y elige un nombre único (por ejemplo «Spotify en mi PC») y la aplicación. Puedes ejecutarla desde esa tarjeta, consultar el historial y cancelar órdenes pendientes o la cuenta atrás.
+
+El botón **Añadir equipo** abre el formulario en el mismo panel. Las tarjetas empiezan minimizadas; al expandirlas también puedes modificar el nombre, la MAC y el método de encendido, vincular o desvincular el PC y eliminarlo. Las rutas anteriores `/windows` y `/windows/link` muestran este mismo panel para conservar los enlaces del agente. Esta reorganización no añade tablas ni cambia la skill o el protocolo del agente.
 
 Desvincula el PC desde el agente o el panel para revocar su acceso. Si el servidor está inaccesible, el botón del agente informa que no pudo revocar y permite reintentar. Las aplicaciones se ejecutan con los permisos del usuario Windows actual: usa una cuenta normal y autoriza solo aplicaciones de confianza.
 

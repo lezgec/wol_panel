@@ -68,7 +68,7 @@ Sin `WOL_TEST_MARIADB=1`, los casos MariaDB se marcan como omitidos y no se
 intenta conexión. Un error de configuración con la opción habilitada falla la
 suite, en lugar de ocultarse como omisión.
 
-## Verificación del control Windows
+## Verificación del Control de PC
 
 La suite añade vinculación con código temporal, consumo único de credenciales,
 CSRF, propietario, catálogo permitido, revocación, cola sin repetición, caducidad,
@@ -78,11 +78,18 @@ consumidor. Las pruebas Custom cubren firma Lambda, ID de skill, intents y tarea
 para rutinas. Una prueba MCS recorre la Lambda única y los dos endpoints, con el
 mismo token de cuenta, tanto en SQLite como en MariaDB. El SQL se aplica a una base vacía y se reejecuta sin borrar datos.
 
-La suite completa de esta entrega contiene 234 comprobaciones Python (incluye
+La suite completa de esta entrega contiene 244 comprobaciones Python (incluye
 flujos compartidos ejecutados con SQLite y MariaDB 10.11.14). El agente separado
 tiene 22 pruebas .NET y compilación Release sin advertencias. Su vista de
 verificación comprueba DPAPI y dibuja la ventana sin usar credenciales reales ni
 ejecutar órdenes. Nunca se apaga el PC durante las pruebas.
+
+El panel unificado se verifica además con edición atómica de nombre/MAC/método,
+CSRF y propietario, conservación de la vinculación al editar y agrupación de
+aplicaciones, acciones e historial por PC. La revisión del navegador usa una
+base temporal y equipos simulados: registro y edición desde el diálogo, revisión
+del código con el equipo preseleccionado, formulario de apagado sin aplicación
+obligatoria y diseño de escritorio/móvil sin desbordamiento horizontal.
 
 La prueba automatizada no confirma encendido físico, apertura de Spotify real,
 apagado real, entrega SMTP ni vinculación/certificación en Amazon. La VM Azure
