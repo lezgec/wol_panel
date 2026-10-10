@@ -56,3 +56,5 @@ summary:focus-visible,a:focus-visible,button:focus-visible { outline:2px solid v
 @media (max-width:767px) { .panel-shell { padding-top:26px; } .workspace-intro { padding-top:0; } h1 br { display:none; } .usage-note { display:none; } }
 @media (max-width:575px) { .topbar { padding:14px 18px; } .device-summary { padding:16px; gap:10px; flex-wrap:wrap; } .device-identity { flex:1 1 calc(100% - 90px); } .device-summary>.status-badge { order:4; margin-left:52px; } .device-content { padding:18px; } .panel-dialog { padding:20px; } }
 @media (prefers-reduced-motion:reduce) { .expand-icon { transition:none; } }
+
+.web-ad-space { margin: 24px 0; padding: 16px; border: 1px solid #263449; border-radius: 12px; }

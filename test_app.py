@@ -30,7 +30,7 @@ class SQLiteMySQLCursor:
         self.cursor = cursor
 
     def execute(self, sql, params=()):
-        self.cursor.execute(sql.replace('%s', '?'), params)
+        self.cursor.execute(sql.replace('%s', '?').replace(' FOR UPDATE', ''), params)
         return self.cursor.rowcount
 
     def __getattr__(self, name):
@@ -106,8 +106,12 @@ class ApplicationTests(unittest.TestCase):
             guard.start()
             self.addCleanup(guard.stop)
         with self.module.state_connection() as db:
-            for table in ('auth_codes', 'auth_tokens', 'challenges', 'alexa_grants', 'alexa_jobs', 'rate_limits'):
+            for table in ('auth_codes', 'auth_tokens', 'challenges', 'alexa_grants', 'alexa_jobs', 'rate_limits', 'mobile_sessions'):
                 db.execute('DELETE FROM ' + table)
+        with self.module.state_connection() as db:
+            for table in ('plan_accounts','plan_grants','plan_subscriptions','plan_config','ad_tickets','admin_owners','admin_sessions','admin_audit','deletion_requests'):
+                db.execute('DELETE FROM '+table)
+            db.execute('INSERT INTO plan_grants VALUES (?,?,?,?,?,?,?)', ('test-premium', '1', 'test_fixture', int(time.time())+3600, 0, int(time.time()), 'Existing Premium feature regressions'))
         self.client = self.module.app.test_client()
 
     def csrf(self):
@@ -155,6 +159,62 @@ class ApplicationTests(unittest.TestCase):
         self.assertIsInstance(response.json['alexa_ready'], bool)
         self.assertTrue(response.json['csrf_token'])
         self.assertEqual(response.headers['Cache-Control'], 'no-store')
+
+    def test_mobile_remember_requires_authentication_and_csrf(self):
+        route = '/api/mobile/v1/session/remember'
+        self.assertEqual(self.client.post(route, json={'enabled':True}).status_code, 401)
+        self.login()
+        self.assertEqual(self.client.post(route, json={'enabled':True}).status_code, 400)
+        headers = {'X-CSRF-Token':self.csrf()}
+        self.assertEqual(self.client.post(route, headers=headers, json={'enabled':'yes'}).status_code, 400)
+        response = self.client.post(route, headers=headers, json={'enabled':True})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json['remembered'])
+        self.assertIn('Expires=', response.headers['Set-Cookie'])
+        self.assertIn('HttpOnly', response.headers['Set-Cookie'])
+        with self.client.session_transaction() as current:
+            identifier = current['mobile_session_id']
+            self.assertTrue(current.permanent)
+        with self.module.state_connection() as db:
+            row = db.execute('SELECT * FROM mobile_sessions').fetchone()
+            self.assertNotEqual(row['id_hash'], identifier)
+            self.assertEqual(row['user_id'], '1')
+        cookie = self.client.get_cookie('session').value
+        self.assertEqual(self.client.post('/api/mobile/v1/logout', headers=headers).status_code, 200)
+        self.client.set_cookie('session', cookie)
+        self.assertEqual(self.client.get('/api/mobile/v1/devices').status_code, 401)
+
+    def test_mobile_remember_expiry_and_user_binding(self):
+        self.login()
+        headers = {'X-CSRF-Token':self.csrf()}
+        self.client.post('/api/mobile/v1/session/remember', headers=headers, json={'enabled':True})
+        with self.module.state_connection() as db:
+            db.execute('UPDATE mobile_sessions SET expires=0')
+        self.assertEqual(self.client.get('/api/mobile/v1/devices').status_code, 401)
+        self.login()
+        self.client.post('/api/mobile/v1/session/remember', headers=headers, json={'enabled':True})
+        with self.client.session_transaction() as current:
+            current['user_id'] = 2
+        self.assertEqual(self.client.get('/api/mobile/v1/devices').status_code, 401)
+
+    def test_mobile_forget_revokes_old_cookie_and_web_logout(self):
+        self.login()
+        headers = {'X-CSRF-Token':self.csrf()}
+        route = '/api/mobile/v1/session/remember'
+        self.client.post(route, headers=headers, json={'enabled':True})
+        cookie = self.client.get_cookie('session').value
+        response = self.client.post(route, headers=headers, json={'enabled':False})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json['remembered'])
+        self.assertNotIn('Expires=', response.headers['Set-Cookie'])
+        self.client.set_cookie('session', cookie)
+        self.assertEqual(self.client.get('/api/mobile/v1/devices').status_code, 401)
+        self.login()
+        self.client.post(route, headers=headers, json={'enabled':True})
+        cookie = self.client.get_cookie('session').value
+        self.client.get('/logout')
+        self.client.set_cookie('session', cookie)
+        self.assertEqual(self.client.get('/api/mobile/v1/devices').status_code, 401)
 
     def test_mobile_wake_enforces_csrf_ownership_and_coming_soon(self):
         self.login()
@@ -469,8 +529,7 @@ class ApplicationTests(unittest.TestCase):
                                                   'wake_host': 'casa.example.net', 'wake_port': '40009', 'csrf_token': self.csrf()})
         self.assertEqual(response.status_code, 302)
         with self.business_connection() as db:
-            self.assertEqual(db.execute("SELECT wake_method,wake_host,wake_port FROM devices WHERE name='Router PC'").fetchone(),
-                             ('router', 'casa.example.net', 40009))
+            self.assertIsNone(db.execute("SELECT wake_method,wake_host,wake_port FROM devices WHERE name='Router PC'").fetchone())
         self.client.post('/devices/1/settings', data={'wake_method': 'alexa', 'csrf_token': self.csrf()})
         self.client.post('/devices/2/settings', data={'wake_method': 'router', 'wake_host': '8.8.8.8', 'csrf_token': self.csrf()})
         with self.business_connection() as db:
@@ -484,8 +543,8 @@ class ApplicationTests(unittest.TestCase):
         for port in ('0', '65536', 'not-a-port'):
             with self.assertRaises(ValueError):
                 self.module.wake_settings({'wake_method': 'router', 'wake_host': '8.8.8.8', 'wake_port': port})
-        self.assertEqual(self.module.wake_settings({'wake_method': 'router', 'wake_host': 'CASA.example.net', 'wake_port': '40009'}),
-                         ('router', 'casa.example.net', 40009))
+        with self.assertRaises(ValueError):
+            self.module.wake_settings({'wake_method': 'router', 'wake_host': 'CASA.example.net', 'wake_port': '40009'})
 
     def test_router_send_resolves_public_destination_and_blocks_private_dns(self):
         self.login()
@@ -497,8 +556,8 @@ class ApplicationTests(unittest.TestCase):
             return real_lookup(host, port, *args, **kwargs)
         with patch.object(self.module.socket, 'getaddrinfo', side_effect=lookup), patch.object(self.module, 'send_wol', return_value=True) as send:
             result = self.client.post('/wake/1', data={'csrf_token': self.csrf()}, follow_redirects=True)
-            send.assert_called_once_with('AA:BB:CC:DD:EE:FF', '8.8.8.8', 40009)
-            self.assertIn(b'Paquete de encendido enviado', result.data)
+            send.assert_not_called()
+            self.assertIn('encendido por router se ha retirado', result.get_data(as_text=True))
         with patch.object(self.module.socket, 'getaddrinfo', return_value=[(socket.AF_INET, socket.SOCK_DGRAM, 17, '', ('127.0.0.1', 40009))]), patch.object(self.module, 'send_wol') as send:
             self.assertFalse(self.module.send_router_wol('AA:BB:CC:DD:EE:FF', 'casa.example.net', 40009))
             send.assert_not_called()
@@ -507,8 +566,8 @@ class ApplicationTests(unittest.TestCase):
         self.set_device_method('router', 'casa.example.net', 40009)
         with patch.object(self.module, 'send_router_wol', return_value=True) as send:
             result = self.client.post('/alexa/smarthome', json=self.directive(self.token()))
-            self.assertEqual(result.json['event']['header']['name'], 'Response')
-            send.assert_called_once_with('AA:BB:CC:DD:EE:FF', 'casa.example.net', 40009)
+            self.assertEqual(result.json['event']['header']['name'], 'ErrorResponse')
+            send.assert_not_called()
 
     def test_echo_discovery_exposes_normalized_mac(self):
         self.set_device_method('alexa')

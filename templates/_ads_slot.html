@@ -1,0 +1,3 @@
+{% if plan and plan.ads.enabled and plan.ads.web and web_ads.client and web_ads[ad_kind] %}
+<aside class="web-ad-space" data-ad-space data-client="{{ web_ads.client }}" data-slot="{{ web_ads[ad_kind] }}" data-layout="{{ ad_kind }}" aria-label="Publicidad" hidden><span class="small text-secondary">Publicidad</span></aside>
+{% endif %}

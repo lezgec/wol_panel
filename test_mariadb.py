@@ -78,6 +78,23 @@ class MariaDBApplicationTests(base.ApplicationTests):
         self.client.post('/add', data={'name': name, 'mac': 'AA:BB:CC:DD:EE:09', 'wake_method': 'alexa', 'csrf_token': self.csrf()})
         self.assertEqual(database.fetch_one('SELECT name FROM devices WHERE name=%s', (name,))[0], name)
 
+    def test_free_registration_quota_serializes_competing_requests(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from windows_agent import AgentError
+        with self.module.state_connection() as state:
+            state.execute('DELETE FROM plan_grants')
+        database.execute('DELETE FROM devices WHERE user_sub=%s', ('1',))
+        def create(index):
+            try:
+                self.module.plans.create_device(1,'Concurrent '+str(index),'AA:BB:CC:DD:EE:01')
+                return 'created'
+            except AgentError as error:
+                return error.code
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results=list(pool.map(create,range(2)))
+        self.assertCountEqual(results,['created','device_limit'])
+        self.assertEqual(len(self.module.plans.devices(1)),1)
+
 
 @unittest.skipUnless(os.environ.get('WOL_TEST_MARIADB') == '1', 'MariaDB aislada no habilitada.')
 class MariaDBAgentTests(agents.AgentFlowTests):

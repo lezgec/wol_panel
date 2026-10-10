@@ -9,6 +9,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
     <script src="{{ url_for('static', filename='dashboard.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='web_ads.js') }}" defer></script>
 </head>
 <body>
     <nav class="topbar">
@@ -18,14 +19,17 @@
         </a>
         <div class="d-flex align-items-center gap-3">
             <span class="text-secondary small d-none d-md-inline">{{ email }}</span>
+            <a href="{{ url_for('plans.page') }}" class="btn btn-outline-success btn-sm">Mi plan</a>
             <a href="{{ url_for('logout') }}" class="btn btn-outline-secondary btn-sm">Salir</a>
         </div>
     </nav>
     <main class="container panel-shell">
+        {% with ad_kind='banner' %}{% include '_ads_slot.html' %}{% endwith %}
         {% for category, message in get_flashed_messages(with_categories=true) %}<div class="alert alert-{{ category }}" role="alert">{{ message }}</div>{% endfor %}
         {% if link_complete %}<div class="alert alert-success" role="status">PC autorizado. Vuelve al agente de WoL Pro en tu PC: completará la vinculación automáticamente.</div>{% endif %}
         <div class="row g-4 g-xl-5">
             <aside class="col-md-4">
+                {% with ad_kind='rectangle' %}{% include '_ads_slot.html' %}{% endwith %}
                 <div class="workspace-intro">
                     <span class="eyebrow">TU ESPACIO WOL PRO</span>
                     <h1>Tus equipos.<br> En un solo lugar.</h1>
@@ -61,7 +65,7 @@
                     <details class="device-card" id="pc-{{ dev[0] }}" data-device-card>
                         <summary class="device-summary">
                             <span class="computer-icon" aria-hidden="true">▣</span>
-                            <span class="device-identity"><strong>{{ dev[1] }}</strong><span class="device-meta">{{ dev[2] }} · {{ {'local':'Red local','router':'Router','alexa':'Alexa / Echo'}.get(dev[3], 'Red local') }}</span></span>
+                            <span class="device-identity"><strong>{{ dev[1] }}</strong><span class="device-meta">{{ dev[2] }} · {{ {'local':'Configuración anterior','router':'Configuración anterior','alexa':'Alexa / Echo'}.get(dev[3], 'Red local') }}</span></span>
                             {% if windows_agent_enabled %}<span data-pc-status="{{ dev[0] }}" class="status-badge {{ 'is-online' if pc and pc.pc_online else '' }}">{{ 'PC conectado · control disponible' if pc and pc.online else ('PC conectado · agente de sesión sin conexión' if pc and pc.pc_online else ('Sin conexión' if pc and pc.active else 'Sin vincular')) }}</span>{% endif %}
                             <span class="expand-icon" aria-hidden="true">＋</span>
                         </summary>
@@ -71,10 +75,10 @@
                                     <h3 id="wake-title-{{ dev[0] }}" class="h6 mb-0">Encendido</h3>
                                     <form method="post" action="{{ url_for('wake_device', device_id=dev[0]) }}">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                        <button class="btn btn-success btn-sm">{{ 'Cómo encender con Alexa' if dev[3] == 'alexa' else 'Encender equipo' }}</button>
+                                        <button class="btn btn-success btn-sm">{{ 'Cómo encender con Alexa' if dev[3] == 'alexa' else 'Configurar Alexa' }}</button>
                                     </form>
                                 </div>
-                                <p class="small text-secondary mb-0">{% if dev[3] == 'alexa' %}Di «Alexa, enciende {{ dev[1] }}» o usa la app Alexa.{% elif dev[3] == 'router' %}Paquete UDP a {{ dev[4] }}:{{ dev[5] }} mediante tu router configurado.{% else %}El servidor debe estar en la misma red que tu PC.{% endif %}</p>
+                                <p class="small text-secondary mb-0">{% if dev[3] == 'alexa' %}Di «Alexa, enciende {{ dev[1] }}» o usa la app Alexa.{% else %}Este equipo conserva una configuración anterior. Modifícalo y guarda el método Alexa para continuar.{% endif %}</p>
                             </section>
                             {% if windows_agent_enabled %}{% include '_pc_controls.html' %}{% endif %}
                             <section class="pc-section">

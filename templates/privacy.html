@@ -2,6 +2,7 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Política de Privacidad - WoL Pro</title>
     {% include "_icons.html" %}
     <style>
@@ -12,6 +13,8 @@
         h2 { font-size: 18px; margin-top: 30px; color: #20c997; }
         p, li { font-size: 14px; color: #8b949e; }
         strong { color: #f8f9fa; }
+        a { color: #67e8f9; }
+        @media (max-width: 480px) { body { padding: 12px; } .container { padding: 20px; } }
     </style>
 </head>
 <body>
@@ -28,6 +31,8 @@
             <li><strong>Autorizaciones:</strong> Tokens de vinculación y permisos de Alexa asociados a cada usuario para procesar sus órdenes.</li>
             <li><strong>Registros de operación:</strong> Accesos, cambios y solicitudes de encendido, junto con identificadores temporales para limitar solicitudes.</li>
             <li><strong>Control de PC:</strong> Identificadores y nombres de aplicaciones autorizadas, permisos de apagado, acciones y resultados de órdenes. Las rutas de ejecutables permanecen en el PC. La credencial del agente se guarda protegida en Windows; en el servidor se conserva su hash y puedes revocar el acceso desde el panel.</li>
+            <li><strong>Sesión móvil:</strong> La app utiliza la sesión del panel. Si eliges mantenerla, el servidor conserva un identificador con hash y caducidad de hasta 30 días. Cerrar sesión o desactivar esta opción revoca ese acceso.</li>
+            <li><strong>Biometría:</strong> La verificación de huella o rostro la realiza el sistema del teléfono. WoL Pro recibe únicamente el resultado de la autenticación y no recopila imágenes, plantillas biométricas ni el código de desbloqueo. El teléfono guarda la preferencia de bloqueo en su almacenamiento seguro.</li>
         </ul>
 
         <h2>2. Uso de la Información</h2>
@@ -39,14 +44,16 @@
         </ul>
 
         <h2>3. Protección de Datos y Compartición</h2>
-        <p>Sus datos personales <strong>nunca son vendidos, comercializados ni compartidos</strong> con terceros con fines publicitarios o comerciales. La información solo se procesa a través de la infraestructura técnica propia y servicios de infraestructura esenciales (como proveedores de correo y túneles seguros) bajo estrictas normas de confidencialidad.</p>
+        <p>WoL Pro no vende datos personales. Los proveedores de alojamiento, protección de la conexión y correo procesan la información necesaria para prestar el servicio. La versión 1.1 incorpora módulos de Google Play Billing y Google Mobile Ads preparados para activarse cuando estén configurados. Mientras las compras y la publicidad estén desactivadas, no se solicitan anuncios ni compras. Si se activan anuncios para Free, Google puede procesar datos del dispositivo, interacciones publicitarias y diagnósticos según el consentimiento y la configuración aplicable. Se ofrecerán opciones de privacidad. Premium no solicita ni muestra anuncios.</p>
         <p>Si vincula Alexa, Amazon recibe los nombres y las MAC de los equipos con método Echo, sus identificadores y los eventos necesarios para el encendido. La infraestructura de alojamiento y el proveedor de correo procesan los datos necesarios para prestar el servicio. Puede solicitar la revocación de autorizaciones y la eliminación de datos al soporte.</p>
 
+        <h2>Compras, planes y recompensas</h2><p>El servidor guarda el estado, producto, vencimiento y comprobante de las suscripciones verificadas con Google Play. Google recibe un identificador de cuenta ofuscado; WoL Pro no recibe los datos de tu tarjeta. Las recompensas se verifican con AdMob mediante un identificador temporal y pausan la publicidad durante 30 minutos. No activan Premium. Los registros administrativos permiten investigar cambios de plan y accesos. Puedes administrar o cancelar tu suscripción desde Google Play; la eliminación de tu cuenta WoL Pro no cancela automáticamente la suscripción de la tienda.</p>
         <h2>4. Seguridad de la Información</h2>
         <p>Implementamos medidas de seguridad técnicas y administrativas razonables (como conexiones HTTPS cifradas y almacenamiento seguro de contraseñas) para proteger sus datos contra acceso no autorizado, alteración o divulgación.</p>
 
-        <h2>5. Derechos del Usuario y Eliminación de Cuenta</h2>
-        <p>Usted tiene derecho a acceder, corregir o solicitar la eliminación total de sus datos personales y dispositivos registrados en cualquier momento cerrando su cuenta o contactando al soporte técnico a través de <strong>support@luiszamora.dev</strong>.</p>
+        <h2 id="account-deletion">5. Derechos del Usuario y Eliminación de Cuenta</h2>
+        <p>Puedes solicitar acceso, corrección o eliminación de tu cuenta y sus datos asociados a través de <a href="mailto:dev@luiszamora.dev">dev@luiszamora.dev</a>. Consulta <a href="{{ url_for('account_deletion') }}">cómo solicitar la eliminación de tu cuenta</a>. No necesitas tener la app instalada para hacerlo.</p>
+        <p>Los datos de la cuenta, equipos, vinculaciones, acciones e historial se conservan para prestar el servicio mientras mantengas la cuenta. Al atender una solicitud de eliminación se borran los datos asociados y se revocan los accesos; si existe una obligación legal o un incidente de seguridad que requiera conservar información, soporte informará del motivo y plazo aplicable. La eliminación no borra aplicaciones ni archivos de tus equipos Windows.</p>
 
         <h2>6. Cambios en esta Política</h2>
         <p>Nos reservamos el derecho de actualizar esta Política de Privacidad en cualquier momento. Las modificaciones entrarán en vigencia de forma inmediata tras su publicación en esta misma página.</p>

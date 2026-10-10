@@ -10,22 +10,11 @@
     </div>
     <div class="col-12">
         <label for="method-{{ key }}" class="form-label">Método de encendido</label>
-        <select id="method-{{ key }}" name="wake_method" class="form-select">
-            {% for value, label in [('alexa', 'Alexa · Echo en casa'), ('router', 'Router por Internet'), ('local', 'Red local del servidor')] %}
-            {% if value != 'local' or allow_local %}
-            <option value="{{ value }}" {{ 'selected' if device and device[3] == value else '' }}>{{ label }}</option>
-            {% endif %}
-            {% endfor %}
-        </select>
-        {% if device and device[3] == 'local' and not allow_local %}<p class="form-text text-warning">Selecciona Alexa o Router para encender desde Internet.</p>{% endif %}
+        <input type="hidden" name="wake_method" value="alexa">
+        <p class="form-text">Alexa · Echo compatible en la misma red del PC.</p>
+        {% if device and device[3] != 'alexa' %}<p class="form-text text-warning">Este equipo conserva una configuración anterior. Guardar lo configurará para encender con Alexa.</p>{% endif %}
     </div>
-    <div class="col-12" data-router-fields hidden>
-        <label for="host-{{ key }}" class="form-label">IP pública o dominio DDNS del router</label>
-        <input id="host-{{ key }}" name="wake_host" class="form-control mb-3" maxlength="253" value="{{ (device[4] or '') if device else '' }}" placeholder="casa.ejemplo.net">
-        <label for="port-{{ key }}" class="form-label">Puerto UDP externo</label>
-        <input id="port-{{ key }}" name="wake_port" class="form-control" type="number" min="1" max="65535" value="{{ device[5] if device else 9 }}">
-        <p class="form-text">El router debe tener Wake-on-WAN configurado previamente y una conexión pública accesible. Esta app no cambia su configuración.</p>
-    </div>
+
 </div>
 <p data-method-note class="small text-secondary mt-3 mb-0"></p>
 {% endmacro %}

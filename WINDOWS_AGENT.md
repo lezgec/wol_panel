@@ -92,3 +92,22 @@ Al actualizar Azure:
 El instalador y el ZIP no se guardan en Git ni contienen credenciales. Los ficheros permanecen en la carpeta de estado al actualizar el código. La copia a Azure sigue siendo manual. Hasta que copies el instalador, el panel sigue ofreciendo el ZIP existente en esa carpeta, con sus instrucciones de descompresión.
 
 El instalador se abre en el PC Windows, nunca en Azure. Instala para el usuario actual, crea el acceso del menú Inicio, incluye desinstalador y ofrece escritorio e inicio en bandeja como opciones. Al actualizar o desinstalar, conserva la vinculación y los comandos fuera de su carpeta de programas. El instalador todavía no tiene firma digital del editor; Windows puede mostrar un aviso.
+
+
+## API de control para la app móvil
+
+La app Android/iOS utiliza la sesión web protegida y un puente del mismo origen. Las rutas `/api/mobile/v1/control` usan CSRF en escrituras y comprueban propietario. No admiten credenciales del agente ni scripts enviados desde el teléfono.
+
+- `GET /api/mobile/v1/control`: presencia, catálogo permitido, acciones e historial; excluye hashes y comprobantes privados.
+- `POST /api/mobile/v1/control/devices/{id}/run`: `kind` launch/shutdown, `app_key` para launch y `request_id` UUID. Responde 202 con `command_id`; la misma solicitud comparte una orden. Usa `AgentService.enqueue`, con permisos, conexión y caducidad existentes.
+- `POST /api/mobile/v1/control/commands/{id}/cancel`: cancela pendientes o solicita cancelar el apagado integrado recibido/programado. Una aplicación o script iniciado no puede cancelarse.
+- `POST /api/mobile/v1/control/pair/preview`: comprueba `code` y devuelve nombre del PC para confirmación.
+- `POST /api/mobile/v1/control/devices/{id}/pair`: autoriza `code` para un equipo propio; el agente consume su credencial mediante el protocolo existente.
+- `DELETE /api/mobile/v1/control/devices/{id}/agent`: revoca el agente y deja sin autorización el servicio de presencia.
+- `POST /api/mobile/v1/control/devices/{id}/actions`: guarda nombre, kind y app_key autorizado; compartido con el panel y Alexa.
+- `DELETE /api/mobile/v1/control/actions/{id}`: elimina una acción propia.
+
+La app funciona por Internet, incluyendo datos móviles; Azure y el agente se comunican por HTTPS. Estar conectado mediante el servicio de presencia no habilita órdenes sin sesión interactiva. Para desplegar copiar `mobile_control.py` junto a `app.py` y reiniciar el servicio. No se requiere una nueva migración para estas rutas.
+
+
+`POST /api/mobile/v1/session/remember` con `enabled` booleano activa/desactiva la conservación de la sesión durante un máximo de 30 días. Requiere sesión y CSRF. La cookie continúa HttpOnly; se comprueba en cada petición autenticada un registro con hash de identificador, propietario y caducidad. La tabla `mobile_sessions` se crea automáticamente en el estado SQLite de autenticación, sin migración MariaDB. Cerrar sesión en web/app o desactivar esta opción invalida la cookie recordada anterior. La biometría es un bloqueo local opcional y no renueva una sesión caducada.

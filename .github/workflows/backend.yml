@@ -1,0 +1,47 @@
+name: Backend and account entitlements
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -r requirements.txt
+      - run: python -m unittest test_app test_windows_agent test_monetization -q
+  mariadb:
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: isolated-ci-password
+        ports: ['3306:3306']
+        options: --health-cmd="healthcheck.sh --connect --innodb_initialized" --health-interval=10s --health-timeout=5s --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -r requirements.txt
+      - name: Create isolated test database
+        run: |
+          python - <<'PY'
+          import pymysql
+          with pymysql.connect(host='127.0.0.1',user='root',password='isolated-ci-password',autocommit=True) as db:
+              with db.cursor() as c:
+                  c.execute('CREATE DATABASE wol_test_plans CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci')
+                  c.execute("CREATE USER 'wol_test_user'@'%' IDENTIFIED BY 'isolated-test-password'")
+                  c.execute("GRANT ALL ON wol_test_plans.* TO 'wol_test_user'@'%'")
+          PY
+      - name: Verify real InnoDB transactions and concurrent quota
+        env:
+          WOL_TEST_MARIADB: '1'
+          DB_HOST: 127.0.0.1
+          DB_NAME: wol_test_plans
+          DB_USER: wol_test_user
+          DB_PASSWORD: isolated-test-password
+        run: python -m unittest test_mariadb -q
