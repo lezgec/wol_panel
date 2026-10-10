@@ -124,7 +124,7 @@ class AgentService:
         clean = []
         for app in apps:
             if not isinstance(app, dict) or set(app) != {'id', 'name'}:
-                raise AgentError('invalid_catalog', 'Solo se admiten identificadores y nombres de aplicaciones.')
+                raise AgentError('invalid_catalog', 'Solo se admiten identificadores y nombres del catálogo autorizado.')
             try:
                 key = str(uuid.UUID(app['id']))
             except (ValueError, TypeError, AttributeError):
@@ -157,7 +157,7 @@ class AgentService:
                     raise AgentError('not_allowed', 'Autoriza el apagado en el agente de Windows.', 409)
             elif kind == 'launch':
                 if not self.rows(c, 'SELECT app_key FROM agent_apps WHERE agent_id=%s AND app_key=%s', (agent_id, app_key)):
-                    raise AgentError('not_allowed', 'La aplicación ya no está autorizada en este PC.', 409)
+                    raise AgentError('not_allowed', 'La aplicación o el comando ya no está autorizado en este PC.', 409)
             else:
                 raise AgentError('invalid_action', 'Acción inválida.')
             dedupe_hash = digest(str(user_id)+':'+dedupe)
@@ -368,7 +368,7 @@ def install(app, database, state_connection, rate_allowed, audit, render_dashboa
         key = request.form.get('app_key') if kind == 'launch' else None
         if kind == 'launch':
             if not service.first('SELECT app_key FROM agent_apps WHERE agent_id=%s AND app_key=%s', (agent_id, key)):
-                raise AgentError('not_allowed', 'Selecciona una aplicación permitida.')
+                raise AgentError('not_allowed', 'Selecciona una aplicación o un comando permitido.')
         elif kind != 'shutdown' or not linked['allow_shutdown']:
             raise AgentError('not_allowed', 'Autoriza el apagado en Windows primero.')
         if service.first('SELECT id FROM agent_actions WHERE user_id=%s AND name=%s', (user, name)):

@@ -108,6 +108,33 @@ class AgentFlowTests(base.ApplicationTests):
         self.assertEqual(result.status_code, 400)
         self.assertEqual(len(self.service.all('SELECT * FROM agent_apps')), 1)
 
+    def test_saved_console_command_uses_catalog_and_can_be_revoked_before_execution(self):
+        self.pair()
+        response = self.client.post('/api/agent/v1/heartbeat', headers=self.headers,
+            json={'apps':[{'id':self.app_key,'name':'Reiniciar mi PC'}], 'allow_shutdown':False})
+        self.assertEqual(response.status_code, 200)
+        created = self.client.post('/windows/actions', data={'csrf_token':self.csrf(),
+            'name':'Reiniciar mi PC', 'kind':'launch','agent_id':self.agent['id'],'app_key':self.app_key})
+        self.assertEqual(created.status_code, 302)
+        action = self.service.first('SELECT * FROM agent_actions WHERE agent_id=%s', (self.agent['id'],))
+        command_id = self.service.execute_action(1, action['id'], 'console-test')
+        claim = self.client.post('/api/agent/v1/commands/claim', headers=self.headers, json={}).get_json()['command']
+        self.assertEqual(claim['id'], command_id)
+        self.assertEqual(claim['app_key'], self.app_key)
+        self.assertNotIn('script', claim)
+        endpoint = '/api/agent/v1/commands/' + command_id + '/authorize'
+        receipt = {'claim_token':claim['claim_token']}
+        self.assertTrue(self.client.post(endpoint, headers=self.headers, json=receipt).get_json()['allowed'])
+        page = self.client.get('/').get_data(as_text=True)
+        self.assertIn('Aplicación o comando autorizado', page)
+        self.assertIn('Reiniciar mi PC', page)
+        # Turning off the local console permission withdraws commands from heartbeat.
+        self.client.post('/api/agent/v1/heartbeat', headers=self.headers, json={'apps':[], 'allow_shutdown':False})
+        self.assertFalse(self.client.post(endpoint, headers=self.headers, json=receipt).get_json()['allowed'])
+        rejected = self.client.post('/api/agent/v1/heartbeat', headers=self.headers,
+            json={'apps':[{'id':self.app_key,'name':'Reiniciar','script':'shutdown.exe /r /t 0'}], 'allow_shutdown':False})
+        self.assertEqual(rejected.status_code, 400)
+
     def test_agent_queue_deduplicates_claims_and_receipts(self):
         self.pair()
         command_id = self.command(dedupe='repeat')

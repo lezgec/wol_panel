@@ -1,6 +1,8 @@
 # Ampliar la misma skill WoL Pro
 
-Usamos **una sola skill**, el Skill ID existente y su vinculación de cuenta. La ampliamos a **Multi-capability Skill (MCS)**: Smart Home para el encendido actual y Custom para abrir aplicaciones y solicitar apagados.
+Usamos **una sola skill**, el Skill ID existente y su vinculación de cuenta. La ampliamos a **Multi-capability Skill (MCS)**: Smart Home para el encendido actual y Custom para ejecutar acciones del panel (aplicaciones, comandos locales autorizados y apagados).
+
+Para comandos CMD/PowerShell, guárdalos y activa su permiso en el agente del PC; luego crea la acción en el panel seleccionando ese nombre. El modelo Custom y las rutinas existentes pueden invocarla sin otra skill ni cambios en Lambda para este añadido. El texto del script se queda en el PC. Un comando personalizado de apagar/reiniciar no usa la cuenta atrás de 30 segundos del apagado integrado.
 
 La carpeta `alexa-custom` contiene el modelo Custom de esa misma skill; no es una segunda skill.
 

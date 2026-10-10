@@ -1,6 +1,6 @@
 # Control de PC y actualización manual
 
-El agente [wolpro_agent](https://github.com/lezgec/wolpro_agent) abre aplicaciones autorizadas y permite apagar el PC con una cuenta atrás cancelable de 30 segundos. Funciona en la sesión de Windows; necesita estar abierto y tener Internet. Se conecta por HTTPS al servidor cada cinco segundos. No necesita puertos entrantes en casa. El encendido sigue usando la integración WoL existente.
+El agente [wolpro_agent](https://github.com/lezgec/wolpro_agent) abre aplicaciones autorizadas, inicia comandos CMD/PowerShell personalizados y permite apagar el PC con una cuenta atrás cancelable de 30 segundos. Funciona en la sesión de Windows; necesita estar abierto y tener Internet. Se conecta por HTTPS al servidor cada cinco segundos. No necesita puertos entrantes en casa. El encendido sigue usando la integración WoL existente.
 
 ## Actualizar tu servidor Azure
 
@@ -27,14 +27,16 @@ Reinicia **el servicio que ya utilizas para WoL Pro**. El Control de PC aparecer
 1. Ejecuta el agente en el PC; guarda el dominio HTTPS real del servidor.
 2. Pulsa **Vincular cuenta**. El navegador abre `/windows/link` con un código público temporal de cinco minutos. Inicia sesión o crea/verifica tu cuenta en el acceso web existente.
 3. Confirma el código y selecciona un equipo de tu cuenta, o registra uno con nombre y MAC. La credencial privada llega directamente al agente, se guarda con DPAPI para tu usuario Windows y caduca a los 90 días; entonces vuelve a vincular.
-4. Autoriza aplicaciones desde Windows con **Añadir .exe** o **Añadir Spotify**. Spotify debe estar instalado y tener registrado su protocolo. Los ejecutables se abren sin argumentos adicionales. Para apagar, activa el permiso local específico.
-5. En el panel, expande la tarjeta de tu equipo. En **Control de PC**, pulsa **Crear una acción** y elige un nombre único (por ejemplo «Spotify en mi PC») y la aplicación. Puedes ejecutarla desde esa tarjeta, consultar el historial y cancelar órdenes pendientes o la cuenta atrás.
+4. Autoriza aplicaciones desde Windows con **Añadir aplicación (.exe)** o **Añadir Spotify**. Spotify debe estar instalado y tener registrado su protocolo. Para scripts o aplicaciones con argumentos, usa **Añadir comando**, elige CMD/Windows PowerShell, escribe tu script y activa **Permitir mis comandos de consola**. Incluye ejemplos editables de apagar, reiniciar y abrir una aplicación; guardar no ejecuta nada. Para el apagado integrado, activa su permiso local específico.
+5. En el panel, expande la tarjeta de tu equipo. En **Control de PC**, pulsa **Crear una acción**, elige un nombre único (por ejemplo «Spotify en mi PC») y **Ejecutar aplicación o comando**, seleccionando la entrada autorizada. Puedes ejecutarla desde esa tarjeta, consultar el historial y cancelar órdenes pendientes o la cuenta atrás del apagado integrado.
 
 El botón **Añadir equipo** abre el formulario en el mismo panel. Las tarjetas empiezan minimizadas; al expandirlas también puedes modificar el nombre, la MAC y el método de encendido, vincular o desvincular el PC y eliminarlo. Las rutas anteriores `/windows` y `/windows/link` muestran este mismo panel para conservar los enlaces del agente. Esta reorganización no añade tablas ni cambia la skill o el protocolo del agente.
 
 Desvincula el PC desde el agente o el panel para revocar su acceso. Si el servidor está inaccesible, el botón del agente informa que no pudo revocar y permite reintentar. Las aplicaciones se ejecutan con los permisos del usuario Windows actual: usa una cuenta normal y autoriza solo aplicaciones de confianza.
 
 Las órdenes caducan a los 60 segundos. Una orden recibida nunca se vuelve a poner en cola. Antes de ejecutar, el agente consulta si sigue autorizada; si el PC se desconecta durante la cuenta atrás, se cancela el apagado. Ante un reinicio después de recibir una orden, el resultado queda «sin confirmar» y no se repite la ejecución. Windows puede bloquear un apagado para proteger trabajo sin guardar; no se fuerza el cierre de aplicaciones.
+
+Los comandos personalizados se ejecutan sin consola visible y con los permisos de la sesión Windows, sin elevación automática. No usan los 30 segundos de cancelación ni el permiso del apagado integrado: por ejemplo, `shutdown.exe /r /t 0` solicita reiniciar inmediatamente. Desactivar su permiso retira los comandos del catálogo y bloquea las órdenes aún no iniciadas, pero no detiene procesos iniciados. «Solicitud procesada» confirma el inicio de la consola; el agente muestra el código de salida en su actividad local cuando termina. La salida de texto no se envía al servidor. Esta ampliación reutiliza IDs/nombres del catálogo y órdenes `launch`; no añade columnas, tablas ni parámetros de script a la API.
 
 ## Alexa
 
@@ -56,4 +58,4 @@ Todos los POST exigen JSON. Solo `pair/start` y `pair/poll` son públicos; el re
 | `commands/{id}/report` | Confirmar estado con comprobante privado de recepción |
 | `unlink` | Revocar credencial |
 
-El servidor almacena hashes de las credenciales y códigos. Los nombres de aplicaciones y acciones, permisos y resultados sí se guardan en MariaDB. Los paths locales y argumentos no se envían al servidor. El agente guarda credencial, catálogo y comprobantes de órdenes cifrados con DPAPI.
+El servidor almacena hashes de las credenciales y códigos. Los nombres del catálogo y acciones, permiso de apagado y resultados sí se guardan en MariaDB. Los paths locales, argumentos y texto de comandos no se envían al servidor. El permiso de consola se aplica en el PC filtrando el catálogo publicado y revisándolo antes de iniciar. El agente guarda credencial, catálogo y comprobantes de órdenes cifrados con DPAPI. CMD usa un archivo temporal local, eliminado al terminar la consola.
