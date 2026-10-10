@@ -43,7 +43,7 @@
                     <p class="small text-secondary">Expande un equipo y vincúlalo con el agente de WoL Pro. Las aplicaciones, los comandos y el permiso de apagado se autorizan en tu PC.</p>
                     {% if agent_download_ready %}
                     <a href="{{ url_for('windows.download_agent') }}" class="btn btn-outline-success btn-sm">Descargar agente para Windows</a>
-                    <p class="small text-secondary mt-2 mb-0">Windows x64 · ZIP portátil. Descomprímelo y abre WolPro.Agent.exe en el PC que quieras controlar.</p>
+                    <p class="small text-secondary mt-2 mb-0">Windows x64 · {% if agent_download_is_installer %}Instalador. Ábrelo y sigue los pasos para instalar WoL Pro en tu PC.{% else %}ZIP portátil. Descomprímelo y abre WolPro.Agent.exe en el PC que quieras controlar.{% endif %}</p>
                     {% else %}
                     <span class="status-badge">Descarga disponible próximamente</span>
                     {% endif %}

@@ -148,6 +148,37 @@ class AgentFlowTests(base.ApplicationTests):
             self.assertEqual(response.status_code, 503)
             self.assertNotIn(str(archive), response.get_data(as_text=True))
 
+    def test_installer_is_preferred_after_copy_and_portable_download_remains_compatible(self):
+        folder = Path(self.temp.name) / 'installer-download'
+        folder.mkdir(exist_ok=True)
+        installer = folder / 'WoLPro-Agent-Setup.exe'
+        portable = folder / 'WoLPro-Agent-win-x64.zip'
+        with ZipFile(portable, 'w') as package:
+            package.writestr('WolPro.Agent.exe', b'fixture-only')
+        with patch.dict(self.module.app.config, WINDOWS_AGENT_DOWNLOAD_PATH=str(installer)):
+            self.login()
+            # The existing ZIP still works while the administrator uploads Setup.
+            response = self.client.get('/windows/download')
+            self.assertEqual(response.mimetype, 'application/zip')
+            self.assertEqual(response.data, portable.read_bytes())
+            response.close()
+            installer.write_bytes(b'MZfixture-only-not-an-installer')
+            page = self.client.get('/').get_data(as_text=True)
+            self.assertIn('Instalador. Ábrelo', page)
+            self.assertNotIn('ZIP portátil.', page)
+            response = self.client.get('/windows/download?path=auth.sqlite3')
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.mimetype, 'application/octet-stream')
+            self.assertEqual(response.data, installer.read_bytes())
+            self.assertIn('WoLPro-Agent-Setup.exe', response.headers['Content-Disposition'])
+            self.assertEqual(response.headers['X-Content-Type-Options'], 'nosniff')
+            response.close()
+            # An explicit custom ZIP location remains respected.
+            with patch.dict(self.module.app.config, WINDOWS_AGENT_DOWNLOAD_PATH=str(portable)):
+                response = self.client.get('/windows/download')
+                self.assertEqual(response.mimetype, 'application/zip')
+                response.close()
+
     def test_saved_console_command_uses_catalog_and_can_be_revoked_before_execution(self):
         self.pair()
         response = self.client.post('/api/agent/v1/heartbeat', headers=self.headers,

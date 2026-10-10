@@ -62,16 +62,18 @@ El servidor almacena hashes de las credenciales y códigos. Los nombres del cat�
 
 ## Descargable desde el panel
 
-El agente vive en el repositorio independiente y privado [wolpro_agent](https://github.com/lezgec/wolpro_agent). Al publicar un tag de versión (por ejemplo `v0.3.0`), su workflow de GitHub Actions ejecuta pruebas, compila Windows x64 con el runtime incluido y adjunta el ZIP y SHA256 a una Release.
+El agente vive en el repositorio independiente y privado [wolpro_agent](https://github.com/lezgec/wolpro_agent). Al publicar un tag de versión (por ejemplo `v0.3.1`), su workflow ejecuta pruebas, compila Windows x64 con el runtime incluido, verifica el instalador en una carpeta de pruebas y adjunta `WoLPro-Agent-Setup.exe`, ZIP portátil y hashes SHA256 a una Release.
 
-Las Releases de un repositorio privado requieren acceso a ese repositorio. Para que los usuarios del panel no necesiten cuenta GitHub, la web sirve una copia del ZIP desde Azure mediante `GET /windows/download`, con la sesión de WoL Pro y `ENABLE_WINDOWS_AGENT=1`. No hay tokens GitHub en el navegador ni es necesario hacer público el código.
+Las Releases de un repositorio privado requieren acceso a ese repositorio. Para que los usuarios del panel no necesiten cuenta GitHub, la web sirve una copia del instalador desde Azure mediante `GET /windows/download`, con la sesión de WoL Pro y `ENABLE_WINDOWS_AGENT=1`. No hay tokens GitHub en el navegador ni es necesario hacer público el código.
 
 Al actualizar Azure:
 
 1. Ejecuta `git pull --ff-only origin main` en `wol_panel`.
-2. Descarga `WoLPro-Agent-win-x64.zip` y su `.sha256` desde la Release del agente, con tu cuenta GitHub. También puedes generar esos archivos localmente con `scripts/Build-Download.ps1` en el repositorio del agente.
-3. Copia el ZIP al servidor y verifica el hash con `sha256sum -c WoLPro-Agent-win-x64.zip.sha256` desde la carpeta que contiene ambos archivos.
-4. Coloca el ZIP en `WOL_STATE_DIR/downloads/WoLPro-Agent-win-x64.zip`, legible por el usuario del servicio. Si utilizas `WOL_STATE_DIR=/var/lib/wol-pro`, la ruta es `/var/lib/wol-pro/downloads/WoLPro-Agent-win-x64.zip`. Crea la carpeta `downloads` si no existe. Para otra ubicación, configura la ruta absoluta con `WOL_AGENT_DOWNLOAD_PATH` en tu `.env` existente.
+2. Descarga `WoLPro-Agent-Setup.exe` y su `.sha256` desde la Release, con tu cuenta GitHub. También puedes generarlos localmente con `scripts/Build-Installer.ps1` (requiere Inno Setup 6).
+3. Copia ambos al servidor y verifica el hash con `sha256sum -c WoLPro-Agent-Setup.exe.sha256` desde la carpeta que los contiene.
+4. Coloca el `.exe` en `WOL_STATE_DIR/downloads/WoLPro-Agent-Setup.exe`, legible por el usuario del servicio. Con `WOL_STATE_DIR=/var/lib/wol-pro`, la ruta es `/var/lib/wol-pro/downloads/WoLPro-Agent-Setup.exe`. Crea `downloads` si no existe. Si habías configurado `WOL_AGENT_DOWNLOAD_PATH` con el ZIP, cambia ese valor por la ruta del instalador (o déjalo vacío para usar la ubicación predeterminada). No cambies la carpeta de estado existente.
 5. Reinicia tu servicio. En el panel aparecerá **Descargar agente para Windows**. Si falta el archivo, aparece «Descarga disponible próximamente».
 
-El ZIP no se guarda en Git ni contiene credenciales; el fichero permanece en la carpeta de estado al actualizar el código. La copia a Azure sigue siendo manual. El descargable es portátil: descomprimir y abrir `WolPro.Agent.exe`; no es un instalador y no incluye firma digital.
+El instalador y el ZIP no se guardan en Git ni contienen credenciales. Los ficheros permanecen en la carpeta de estado al actualizar el código. La copia a Azure sigue siendo manual. Hasta que copies el instalador, el panel sigue ofreciendo el ZIP existente en esa carpeta, con sus instrucciones de descompresión.
+
+El instalador se abre en el PC Windows, nunca en Azure. Instala para el usuario actual, crea el acceso del menú Inicio, incluye desinstalador y ofrece escritorio e inicio en bandeja como opciones. Al actualizar o desinstalar, conserva la vinculación y los comandos fuera de su carpeta de programas. El instalador todavía no tiene firma digital del editor; Windows puede mostrar un aviso.

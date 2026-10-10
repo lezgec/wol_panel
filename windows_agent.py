@@ -242,17 +242,25 @@ def install(app, database, state_connection, rate_allowed, audit, render_dashboa
 
     @app.context_processor
     def feature_context():
+        ready = app.config['ENABLE_WINDOWS_AGENT'] and download_ready()
         return dict(windows_agent_enabled=app.config['ENABLE_WINDOWS_AGENT'],
-                    agent_download_ready=app.config['ENABLE_WINDOWS_AGENT'] and download_ready())
+                    agent_download_ready=ready,
+                    agent_download_is_installer=ready and download_path().suffix.lower() == '.exe')
 
     def download_path():
         # Only server configuration selects the file; request arguments never select paths.
-        return Path(app.config['WINDOWS_AGENT_DOWNLOAD_PATH']).expanduser().resolve()
+        path = Path(app.config['WINDOWS_AGENT_DOWNLOAD_PATH']).expanduser().resolve()
+        # Preserve existing deployments until the operator copies the new installer.
+        if path.name == 'WoLPro-Agent-Setup.exe' and not path.is_file():
+            portable = path.with_name('WoLPro-Agent-win-x64.zip')
+            if portable.is_file():
+                return portable
+        return path
 
     def download_ready():
         try:
             path = download_path()
-            return path.suffix.lower() == '.zip' and path.is_file() and path.stat().st_size > 0
+            return path.suffix.lower() in ('.zip', '.exe') and path.is_file() and path.stat().st_size > 0
         except OSError:
             return False
 
@@ -299,8 +307,10 @@ def install(app, database, state_connection, rate_allowed, audit, render_dashboa
         if not download_ready():
             return 'La descarga del agente todavía no está disponible. Inténtalo más tarde.', 503
         try:
-            return send_file(download_path(), mimetype='application/zip', as_attachment=True,
-                             download_name='WoLPro-Agent-win-x64.zip', conditional=True, max_age=0)
+            path = download_path()
+            installer = path.suffix.lower() == '.exe'
+            return send_file(path, mimetype='application/octet-stream' if installer else 'application/zip', as_attachment=True,
+                             download_name='WoLPro-Agent-Setup.exe' if installer else 'WoLPro-Agent-win-x64.zip', conditional=True, max_age=0)
         except OSError:
             return 'La descarga del agente no está disponible temporalmente.', 503
 
