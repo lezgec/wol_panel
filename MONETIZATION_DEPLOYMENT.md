@@ -73,6 +73,11 @@ La política inicial tiene publicidad desactivada, banner superior, video volunt
 7. Tras revisar consentimiento, las unidades y las declaraciones, define `ADS_LIVE_READY=1` en Azure y activa los formatos/pantallas desde el administrador. El interruptor global y cada cambio se auditan. No basta con modificar el texto de una promoción para crear un precio o espacio de Google.
 8. Actualiza Play Console: declaración de anuncios, identificador publicitario si el AAB lo incluye, Seguridad de datos, privacidad y acceso para revisión. El build predeterminado bloquea `AD_ID`; el build `live` permite el permiso aportado por el SDK, por lo que debe declararse. Revisa el manifiesto final y las prácticas reales de los SDK. No publiques afirmaciones de «sin SDK publicitario» para la versión 1.1.
 
+Los IDs públicos de AdMob/AdSense ya creados y el estado real de las cuentas se
+documentan en [GOOGLE_ADS_SETUP.md](GOOGLE_ADS_SETUP.md). Ese documento añade la
+publicación de `ads.txt` en el dominio principal y `app-ads.txt` en la web de la
+app; conservar ambos archivos junto al backend al actualizar Azure.
+
 ## Solicitudes de eliminación
 
 El enlace público conserva la solicitud por correo sin iniciar sesión y añade, con sesión, una solicitud autenticada que aparece en Admin. Soporte verifica identidad, cancela/revoca accesos, elimina datos de negocio y estado privado y documenta cualquier conservación legal de facturación o seguridad. La suscripción de tienda se cancela por separado. Marcar «completed» en Admin solo registra el estado; **no borra datos**. No marques una solicitud terminada hasta haber realizado el procedimiento. No hay borrado automático irreversible en esta entrega.

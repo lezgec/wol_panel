@@ -1,6 +1,7 @@
 """AdMob ECDSA verification over the unmodified raw query string."""
 import base64
 import os
+import re
 import time
 from urllib.parse import parse_qs
 import requests
@@ -18,6 +19,10 @@ class AdMobVerifier:
         unit=os.environ.get('ADMOB_REWARDED_UNIT')
         if not unit: raise AgentError('ads_disabled','Recompensas todavía no configuradas.',409)
         try:
+            # Google sends only the numeric suffix in ad_unit, while the console
+            # and mobile SDK use ca-app-pub-PUBLISHER/UNIT.
+            configured=re.fullmatch(r'(?:ca-app-pub-\d{16}/)?(\d+)',unit)
+            if not configured: raise ValueError()
             if len(raw)>8192 or raw.count(b'&signature=')!=1: raise ValueError()
             content,tail=raw.split(b'&signature=',1)
             parts=tail.split(b'&key_id=')
@@ -25,7 +30,7 @@ class AdMobVerifier:
             key_id=int(parts[1]); signature=parts[0].decode('ascii')
             fields=parse_qs(content.decode('ascii'),strict_parsing=True)
             if any(len(v)!=1 for v in fields.values()): raise ValueError()
-            if fields['ad_unit'][0]!=unit: raise ValueError()
+            if fields['ad_unit'][0]!=configured.group(1): raise ValueError()
             if abs(int(fields['timestamp'][0])/1000-time.time())>600: raise ValueError()
             if time.time()-self.updated>21600:
                 response=requests.get('https://www.gstatic.com/admob/reward/verifier-keys.json',timeout=10,allow_redirects=False)

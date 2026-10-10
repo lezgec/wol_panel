@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash, send_from_directory
 import database
 import logging
 import socket
@@ -116,6 +116,8 @@ app.jinja_env.globals['csrf_token'] = csrf_token
 
 @app.before_request
 def protect_forms():
+    if request.endpoint == 'authorized_ad_sellers':
+        return  # Public publisher declarations must be crawlable without a session.
     if request.path.startswith(('/api/admin/v1/', '/api/billing/', '/api/ads/ssv')):
         return  # These endpoints verify their own administrator CSRF or provider signature.
     if 'user_id' in session:
@@ -166,7 +168,7 @@ def response_security(response):
     response.headers['X-Frame-Options'] = 'DENY'
     if app.config['SESSION_COOKIE_SECURE']:
         response.headers['Strict-Transport-Security'] = 'max-age=31536000'
-    if request.endpoint not in ('privacy_policy', 'terms_of_use', 'static'):
+    if request.endpoint not in ('privacy_policy', 'terms_of_use', 'static', 'authorized_ad_sellers'):
         response.headers['Cache-Control'] = 'no-store'
     return response
 
@@ -586,6 +588,13 @@ def reset_password():
             error = "Código incorrecto o expirado. Solicita otro código de recuperación."
 
     return render_template('reset_password.html', error=error)
+
+@app.get('/ads.txt')
+@app.get('/app-ads.txt')
+def authorized_ad_sellers():
+    filename = 'app-ads.txt' if request.path == '/app-ads.txt' else 'ads.txt'
+    return send_from_directory(app.root_path, filename, mimetype='text/plain', max_age=3600)
+
 
 @app.route('/privacy')
 def privacy_policy():

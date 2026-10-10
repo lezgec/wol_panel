@@ -15,6 +15,16 @@ Los cuatro repositorios pasaron CI. En [backend y MariaDB](https://github.com/le
 
 ## Pendiente de las cuentas reales
 
+Actualización de configuración publicitaria: AdMob Android tiene sus tres
+unidades creadas y AdSense sus dos espacios gráficos. Se guardaron IDs públicos
+con publicidad desactivada. Las rutas públicas de vendedores y la validación
+del ID numérico que Google envía en SSV pasaron con **156 pruebas locales**.
+La app pasó TypeScript, ESLint y cuatro comprobaciones de configuración:
+Android live sin IDs iOS, rechazo de iOS live sin su ID, bloqueo AD_ID en off y
+rechazo de plataformas desconocidas. No se recompiló ni publicó un AAB en esta
+actualización. Consulta `GOOGLE_ADS_SETUP.md` para pagos, dominio, consentimiento,
+verificación del callback y activación todavía pendientes.
+
 Azure y Admin se despliegan manualmente. Google Play requiere crear productos/oferta, credenciales restringidas, RTDN, reconciliación y compras de prueba. AdMob requiere unidades, UMP y SSV reales; AdSense requiere unidades y CMP. El estado predeterminado no inicia cobros ni solicita anuncios.
 
 El APK de comprobación es debug; no sustituye el AAB firmado con la clave de carga existente. La exportación iOS valida JavaScript, no una compilación Xcode. La validación de compras Apple debe implementarse antes de vender en iOS. La firma digital del instalador Windows y la prueba con el PC físico siguen siendo pasos separados.

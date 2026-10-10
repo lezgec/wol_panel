@@ -114,6 +114,18 @@ class ApplicationTests(unittest.TestCase):
             db.execute('INSERT INTO plan_grants VALUES (?,?,?,?,?,?,?)', ('test-premium', '1', 'test_fixture', int(time.time())+3600, 0, int(time.time()), 'Existing Premium feature regressions'))
         self.client = self.module.app.test_client()
 
+    def test_ad_seller_declarations_are_public_plain_text(self):
+        for path in ('/ads.txt', '/app-ads.txt'):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.mimetype, 'text/plain')
+                self.assertEqual(response.get_data(as_text=True).strip(),
+                                 'google.com, pub-8703217786138724, DIRECT, f08c47fec0942fa0')
+                self.assertIn('max-age=3600', response.headers['Cache-Control'])
+                self.assertNotIn('Set-Cookie', response.headers)
+                response.close()
+
     def csrf(self):
         with self.client.session_transaction() as session:
             session['csrf_token'] = 'test-csrf'

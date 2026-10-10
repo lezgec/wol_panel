@@ -141,12 +141,16 @@ class MonetizationTests(unittest.TestCase):
         from cryptography.hazmat.primitives import hashes
         private=ec.generate_private_key(ec.SECP256R1())
         verifier=AdMobVerifier(); verifier.keys={7:private.public_key()}; verifier.updated=time.time()
-        raw=urlencode(dict(ad_unit='test-unit',timestamp=int(time.time()*1000),custom_data='ticket',transaction_id='transaction')).encode()
+        raw=urlencode(dict(ad_unit='3375316331',timestamp=int(time.time()*1000),custom_data='ticket',transaction_id='transaction')).encode()
         signature=base64.urlsafe_b64encode(private.sign(raw,ec.ECDSA(hashes.SHA256()))).rstrip(b'=')
         query=raw+b'&signature='+signature+b'&key_id=7'
-        with patch.dict(os.environ,ADMOB_REWARDED_UNIT='test-unit'):
-            self.assertEqual(verifier.verify(query),('ticket','transaction'))
-            with self.assertRaises(AgentError): verifier.verify(query.replace(b'ticket',b'forged'))
+        for unit in ('3375316331','ca-app-pub-8703217786138724/3375316331'):
+            with self.subTest(unit=unit),patch.dict(os.environ,ADMOB_REWARDED_UNIT=unit):
+                self.assertEqual(verifier.verify(query),('ticket','transaction'))
+                with self.assertRaises(AgentError): verifier.verify(query.replace(b'ticket',b'forged'))
+        for unit in ('9595083634','invalid-unit'):
+            with self.subTest(unit=unit),patch.dict(os.environ,ADMOB_REWARDED_UNIT=unit):
+                with self.assertRaises(AgentError): verifier.verify(query)
 
     def test_client_cannot_grant_reward_or_premium_with_a_flag(self):
         headers=self.headers()
