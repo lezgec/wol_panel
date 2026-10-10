@@ -17,14 +17,14 @@
         <p class="small text-secondary mb-0">Vincula este equipo con el código que muestra el agente de WoL Pro en tu PC para abrir aplicaciones, ejecutar tus comandos y apagarlo desde aquí o Alexa.</p>
     {% else %}
         <p class="small text-secondary">Mantén el agente abierto en tu PC para recibir órdenes. Apagado {{ 'autorizado' if pc.allow_shutdown else 'no autorizado' }}.</p>
-        {% if not pc.online %}<p class="connection-notice small">El agente está desconectado. Abre WoL Pro en tu PC y actualiza el panel para enviar órdenes.</p>{% endif %}
+        <p data-pc-notice="{{ dev[0] }}" class="connection-notice small" {{ 'hidden' if pc.online else '' }}>{{ 'El PC está conectado. Inicia sesión en Windows y abre el agente para usar aplicaciones y comandos.' if pc.pc_online else 'No hay comunicación reciente. El PC puede estar apagado, suspendido, sin Internet o con el agente cerrado.' }}</p>
         <div class="section-heading mt-4"><h4 class="h6 mb-0">Acciones</h4><a href="{{ url_for('index', _anchor='pc-' ~ dev[0]) }}" class="small text-secondary">Actualizar estado</a></div>
         {% for action in pc.actions %}
         <div class="action-row">
             <div class="me-auto"><strong class="small">{{ action.name }}</strong><div class="small text-secondary">{{ 'Aplicación o comando guardado' if action.kind == 'launch' else 'Apagar PC · 30 segundos' }}</div></div>
             <form method="post" action="{{ url_for('windows.run_action', action_id=action.id) }}">
                 {{ pc_form() }}<input type="hidden" name="nonce" value="{{ pc.nonce }}">
-                <button class="btn btn-success btn-sm" {{ 'disabled' if not pc.online else '' }}>Ejecutar</button>
+                <button data-pc-run="{{ dev[0] }}" class="btn btn-success btn-sm" {{ 'disabled' if not pc.online else '' }}>Ejecutar</button>
             </form>
             <form method="post" action="{{ url_for('windows.delete_action', action_id=action.id) }}" data-confirm="¿Eliminar esta acción? Dejará de estar disponible para Alexa.">
                 {{ pc_form() }}<button class="btn btn-outline-secondary btn-sm" aria-label="Eliminar acción {{ action.name }}">Eliminar</button>

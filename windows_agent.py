@@ -144,6 +144,40 @@ class AgentService:
                     c.execute('INSERT INTO agent_apps (agent_id,app_key,name) VALUES (%s,%s,%s)', (agent['id'], key, name))
         return dict(email=agent['email'], computer_name=agent['computer_name'])
 
+    def register_presence(self, agent):
+        token = secrets.token_urlsafe(48)
+        with self.db.connection() as conn, conn.cursor() as c:
+            rows = self.rows(c, 'SELECT expires FROM agent_connections WHERE id=%s AND revoked=0 AND expires>%s FOR UPDATE', (agent['id'], int(time.time())))
+            if not rows:
+                raise AgentError('unauthorized', 'Vincula este PC de nuevo.', 401)
+            c.execute('DELETE FROM agent_presence WHERE agent_id=%s', (agent['id'],))
+            c.execute('INSERT INTO agent_presence (agent_id,token_hash,expires,last_seen) VALUES (%s,%s,%s,%s)', (agent['id'], digest(token), rows[0]['expires'], 0))
+        return dict(access_token=token, expires_at=rows[0]['expires'])
+
+    def presence_heartbeat(self, token):
+        if not isinstance(token, str) or not token or len(token) > 256:
+            raise AgentError('unauthorized', 'Servicio sin autorización.', 401)
+        now = int(time.time())
+        with self.db.connection() as conn, conn.cursor() as c:
+            rows = self.rows(c, 'SELECT p.agent_id FROM agent_presence p JOIN agent_connections a ON a.id=p.agent_id WHERE p.token_hash=%s AND p.expires>%s AND a.expires>%s AND a.revoked=0 FOR UPDATE', (digest(token), now, now))
+            if not rows:
+                raise AgentError('unauthorized', 'Servicio sin autorización.', 401)
+            c.execute('UPDATE agent_presence SET last_seen=%s WHERE agent_id=%s', (now, rows[0]['agent_id']))
+        return dict(status='connected')
+
+    def connection_states(self, user):
+        now = int(time.time())
+        rows = self.all('SELECT a.device_id,a.expires,a.revoked,a.last_seen,p.last_seen AS boot_last_seen,p.expires AS boot_expires FROM agent_connections a LEFT JOIN agent_presence p ON p.agent_id=a.id WHERE a.user_id=%s', (user,))
+        result = {}
+        for row in rows:
+            active = not row['revoked'] and row['expires'] > now
+            interactive = active and row['last_seen'] >= now-20
+            boot_online = active and (row['boot_expires'] or 0) > now and (row['boot_last_seen'] or 0) >= now-20
+            result[row['device_id']] = dict(active=active, online=interactive, pc_online=interactive or boot_online,
+                state='ready' if interactive else 'connected' if boot_online else 'offline' if active else 'unlinked',
+                last_seen=max(row['last_seen'], row['boot_last_seen'] or 0) if active else None)
+        return result
+
     def enqueue(self, user_id, agent_id, kind, app_key, dedupe):
         now = int(time.time())
         with self.db.connection() as conn, conn.cursor() as c:
@@ -224,9 +258,9 @@ class AgentService:
         self.db.execute('UPDATE agent_commands SET status=%s,result=%s WHERE user_id=%s AND status IN (%s,%s) AND expires<%s', ('uncertain', 'uncertain', user, 'claimed', 'scheduled', now-120))
         commands = self.all('SELECT q.* FROM agent_commands q JOIN agent_connections a ON a.id=q.agent_id JOIN devices d ON d.id=a.device_id WHERE q.user_id=%s ORDER BY q.created DESC,q.id DESC LIMIT 30', (user,))
         result = {}
+        connections = self.connection_states(user)
         for pc in agents:
-            pc['online'] = not pc['revoked'] and pc['expires'] > now and pc['last_seen'] >= now-20
-            pc['active'] = not pc['revoked'] and pc['expires'] > now
+            pc.update(connections.get(pc['device_id'], dict(active=False, online=False, pc_online=False, state='unlinked', last_seen=None)))
             pc['apps'] = [item for item in apps if item['agent_id'] == pc['id']]
             pc['actions'] = [item for item in actions if item['agent_id'] == pc['id']]
             pc['commands'] = [item for item in commands if item['agent_id'] == pc['id']]
@@ -330,6 +364,30 @@ def install(app, database, state_connection, rate_allowed, audit, render_dashboa
     @bp.post('/api/agent/v1/heartbeat')
     def heartbeat():
         return jsonify(service.heartbeat(agent(), body()))
+
+    @bp.post('/api/agent/v1/presence/register')
+    def register_presence():
+        body()
+        return jsonify(service.register_presence(agent()))
+
+    @bp.post('/api/agent/v1/presence/heartbeat')
+    def presence_heartbeat():
+        data = body()
+        if data:
+            raise AgentError('invalid_input', 'El servicio solo confirma conexión.')
+        auth = request.headers.get('Authorization', '')
+        return jsonify(service.presence_heartbeat(auth[7:] if auth.startswith('Bearer ') else None))
+
+    @bp.post('/api/agent/v1/presence/revoke')
+    def revoke_presence():
+        body()
+        current = agent()
+        database.execute('DELETE FROM agent_presence WHERE agent_id=%s', (current['id'],))
+        return jsonify(status='revoked')
+
+    @bp.get('/windows/status')
+    def connection_status():
+        return jsonify(devices=service.connection_states(session['user_id']))
 
     @bp.post('/api/agent/v1/commands/claim')
     def claim():

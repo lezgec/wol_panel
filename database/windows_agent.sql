@@ -30,6 +30,15 @@ CREATE TABLE IF NOT EXISTS agent_apps (
     FOREIGN KEY (agent_id) REFERENCES agent_connections(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Credencial separada: únicamente confirma conexión; no autoriza órdenes.
+CREATE TABLE IF NOT EXISTS agent_presence (
+    agent_id CHAR(36) CHARACTER SET ascii NOT NULL PRIMARY KEY,
+    token_hash CHAR(64) CHARACTER SET ascii NOT NULL UNIQUE,
+    expires BIGINT NOT NULL,
+    last_seen BIGINT NOT NULL DEFAULT 0,
+    FOREIGN KEY (agent_id) REFERENCES agent_connections(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS agent_actions (
     id CHAR(36) CHARACTER SET ascii NOT NULL PRIMARY KEY,
     user_id INT UNSIGNED NOT NULL,

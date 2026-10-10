@@ -78,9 +78,9 @@ consumidor. Las pruebas Custom cubren firma Lambda, ID de skill, intents y tarea
 para rutinas. Una prueba MCS recorre la Lambda única y los dos endpoints, con el
 mismo token de cuenta, tanto en SQLite como en MariaDB. El SQL se aplica a una base vacía y se reejecuta sin borrar datos.
 
-La suite completa de esta entrega contiene 244 comprobaciones Python (incluye
+La suite completa de esta entrega contiene 258 comprobaciones Python (incluye
 flujos compartidos ejecutados con SQLite y MariaDB 10.11.14). El agente separado
-tiene 22 pruebas .NET y compilación Release sin advertencias. Su vista de
+tiene 37 pruebas .NET y compilación Release sin advertencias. Su vista de
 verificación comprueba DPAPI y dibuja la ventana sin usar credenciales reales ni
 ejecutar órdenes. Nunca se apaga el PC durante las pruebas.
 

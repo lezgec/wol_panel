@@ -17,10 +17,12 @@ class AgentFlowTests(base.ApplicationTests):
         super().reset_business()
         with self.business_connection() as db:
             db.executescript('''
+            DROP TABLE IF EXISTS agent_presence;
             DROP TABLE IF EXISTS agent_pairings; DROP TABLE IF EXISTS agent_connections;
             DROP TABLE IF EXISTS agent_apps; DROP TABLE IF EXISTS agent_actions; DROP TABLE IF EXISTS agent_commands;
             CREATE TABLE agent_pairings (device_code_hash TEXT PRIMARY KEY,user_code_hash TEXT UNIQUE,computer_name TEXT,expires INTEGER,user_id INTEGER,device_id INTEGER,status TEXT);
             CREATE TABLE agent_connections (id TEXT PRIMARY KEY,user_id INTEGER,device_id INTEGER UNIQUE,token_hash TEXT UNIQUE,expires INTEGER,last_seen INTEGER,allow_shutdown INTEGER DEFAULT 0,revoked INTEGER DEFAULT 0);
+            CREATE TABLE agent_presence (agent_id TEXT PRIMARY KEY,token_hash TEXT UNIQUE,expires INTEGER,last_seen INTEGER DEFAULT 0);
             CREATE TABLE agent_apps (agent_id TEXT,app_key TEXT,name TEXT,PRIMARY KEY(agent_id,app_key));
             CREATE TABLE agent_actions (id TEXT PRIMARY KEY,user_id INTEGER,agent_id TEXT,name TEXT,kind TEXT,app_key TEXT,UNIQUE(user_id,name));
             CREATE TABLE agent_commands (id TEXT PRIMARY KEY,user_id INTEGER,agent_id TEXT,kind TEXT,app_key TEXT,created INTEGER,expires INTEGER,status TEXT,result TEXT,claim_hash TEXT,cancel_requested INTEGER DEFAULT 0,dedupe_hash TEXT UNIQUE,alexa_correlation TEXT,alexa_endpoint TEXT,alexa_notified INTEGER DEFAULT 0);
@@ -56,6 +58,67 @@ class AgentFlowTests(base.ApplicationTests):
         self.assertEqual(response.status_code, 200)
         self.agent = self.service.authenticate(self.credentials['access_token'])
         return started
+
+    def test_boot_presence_confirms_connection_without_enabling_commands(self):
+        self.pair()
+        self.module.database.execute('INSERT INTO agent_actions (id,user_id,agent_id,name,kind,app_key) VALUES (%s,%s,%s,%s,%s,%s)',
+            (str(uuid.uuid4()), 1, self.agent['id'], 'Spotify de prueba', 'launch', self.app_key))
+        registered = self.client.post('/api/agent/v1/presence/register', headers=self.headers, json={})
+        self.assertEqual(registered.status_code, 200)
+        token = registered.get_json()['access_token']
+        boot_headers = {'Authorization': 'Bearer '+token}
+        self.module.database.execute('UPDATE agent_connections SET last_seen=0')
+        self.assertEqual(self.client.post('/api/agent/v1/presence/heartbeat', headers=boot_headers, json={}).status_code, 200)
+        stored = self.service.first('SELECT * FROM agent_presence')
+        self.assertNotEqual(stored['token_hash'], token)
+        state = self.service.connection_states(1)[1]
+        self.assertEqual(state['state'], 'connected')
+        self.assertTrue(state['pc_online'])
+        self.assertFalse(state['online'])
+        self.assertEqual(self.service.connection_states(2), {})
+        for route in ('commands/claim', 'heartbeat', 'presence/register', 'presence/revoke', 'unlink'):
+            self.assertEqual(self.client.post('/api/agent/v1/'+route, headers=boot_headers, json={}).status_code, 401)
+        self.assertEqual(self.client.post('/api/agent/v1/presence/heartbeat', headers=self.headers, json={}).status_code, 401)
+        self.assertEqual(self.client.post('/api/agent/v1/presence/heartbeat', headers=boot_headers, json={'apps':[]}).status_code, 400)
+        with self.assertRaises(Exception) as failure:
+            self.command()
+        self.assertEqual(failure.exception.code, 'offline')
+        page = self.client.get('/').get_data(as_text=True)
+        self.assertIn('PC conectado · agente de sesión sin conexión', page)
+        self.assertIn('data-pc-run="1"', page)
+        self.assertEqual(self.client.get('/windows/status').get_json()['devices']['1']['state'], 'connected')
+        self.module.database.execute('UPDATE agent_presence SET last_seen=0')
+        self.assertEqual(self.service.connection_states(1)[1]['state'], 'offline')
+
+    def test_boot_presence_rotation_expiry_and_parent_revocation(self):
+        self.pair()
+        def register():
+            return self.client.post('/api/agent/v1/presence/register', headers=self.headers, json={}).get_json()['access_token']
+        def beat(token):
+            return self.client.post('/api/agent/v1/presence/heartbeat', headers={'Authorization':'Bearer '+token}, json={})
+        first = register()
+        second = register()
+        self.assertEqual(beat(first).status_code, 401)
+        self.assertEqual(beat(second).status_code, 200)
+        self.client.post('/api/agent/v1/presence/revoke', headers=self.headers, json={})
+        self.assertEqual(beat(second).status_code, 401)
+        third = register()
+        self.module.database.execute('UPDATE agent_presence SET expires=0')
+        self.assertEqual(beat(third).status_code, 401)
+        fourth = register()
+        self.client.post('/api/agent/v1/unlink', headers=self.headers, json={})
+        self.assertEqual(beat(fourth).status_code, 401)
+        self.assertEqual(self.service.connection_states(1)[1]['state'], 'unlinked')
+
+    def test_connection_status_requires_owner_session_and_feature(self):
+        self.assertEqual(self.client.get('/windows/status').status_code, 302)
+        self.pair()
+        states = self.client.get('/windows/status')
+        self.assertEqual(states.get_json()['devices']['1']['state'], 'ready')
+        self.assertNotIn('2', states.get_json()['devices'])
+        self.assertEqual(states.headers['Cache-Control'], 'no-store')
+        with patch.dict(self.module.app.config, ENABLE_WINDOWS_AGENT=False):
+            self.assertEqual(self.client.get('/windows/status').status_code, 404)
 
     def command(self, kind='launch', dedupe=None):
         return self.service.enqueue(1, self.credentials['agent_id'], kind, self.app_key if kind=='launch' else None, dedupe or str(uuid.uuid4()))

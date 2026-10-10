@@ -52,7 +52,7 @@ class MariaDBApplicationTests(base.ApplicationTests):
 
     def reset_business(self):
         with self.business_connection() as db:
-            for table in ('agent_commands', 'agent_actions', 'agent_apps', 'agent_connections', 'agent_pairings', 'audit_logs', 'devices', 'users'):
+            for table in ('agent_presence', 'agent_commands', 'agent_actions', 'agent_apps', 'agent_connections', 'agent_pairings', 'audit_logs', 'devices', 'users'):
                 db.execute('DELETE FROM ' + table)
             db.execute('ALTER TABLE devices AUTO_INCREMENT=1')
 
@@ -63,7 +63,7 @@ class MariaDBApplicationTests(base.ApplicationTests):
         migrate_db.migrate()
         self.assertEqual(database.fetch_all('SELECT id,name,mac,user_sub FROM devices ORDER BY id'), before)
         tables = database.fetch_all('SELECT TABLE_NAME,ENGINE,TABLE_COLLATION FROM information_schema.TABLES WHERE TABLE_SCHEMA=%s', (os.environ['DB_NAME'],))
-        self.assertEqual(len(tables), 8)
+        self.assertEqual(len(tables), 9)
         for _, engine, collation in tables:
             self.assertEqual(engine, 'InnoDB')
             self.assertTrue(collation.startswith('utf8mb4'))
@@ -98,7 +98,7 @@ class MariaDBAgentTests(agents.AgentFlowTests):
 
     def reset_business(self):
         with self.business_connection() as db:
-            for table in ('agent_commands','agent_actions','agent_apps','agent_connections','agent_pairings','audit_logs','devices','users'):
+            for table in ('agent_presence','agent_commands','agent_actions','agent_apps','agent_connections','agent_pairings','audit_logs','devices','users'):
                 db.execute('DELETE FROM '+table)
             db.execute('ALTER TABLE devices AUTO_INCREMENT=1')
 

@@ -62,7 +62,7 @@
                         <summary class="device-summary">
                             <span class="computer-icon" aria-hidden="true">▣</span>
                             <span class="device-identity"><strong>{{ dev[1] }}</strong><span class="device-meta">{{ dev[2] }} · {{ {'local':'Red local','router':'Router','alexa':'Alexa / Echo'}.get(dev[3], 'Red local') }}</span></span>
-                            {% if windows_agent_enabled %}<span class="status-badge {{ 'is-online' if pc and pc.online else '' }}">{{ 'Agente conectado' if pc and pc.online else ('Agente desconectado' if pc and pc.active else 'Sin vincular') }}</span>{% endif %}
+                            {% if windows_agent_enabled %}<span data-pc-status="{{ dev[0] }}" class="status-badge {{ 'is-online' if pc and pc.pc_online else '' }}">{{ 'PC conectado · control disponible' if pc and pc.online else ('PC conectado · agente de sesión sin conexión' if pc and pc.pc_online else ('Sin conexión' if pc and pc.active else 'Sin vincular')) }}</span>{% endif %}
                             <span class="expand-icon" aria-hidden="true">＋</span>
                         </summary>
                         <div class="device-content">

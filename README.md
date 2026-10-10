@@ -51,3 +51,5 @@ El [agente Windows](https://github.com/lezgec/wolpro_agent) permite vincular un 
 Para activarlo en Azure, ejecuta `python migrate_db.py`, añade `ENABLE_WINDOWS_AGENT=1` al `.env` existente y reinicia tu servicio. Consulta los pasos en [WINDOWS_AGENT.md](WINDOWS_AGENT.md) y la [ampliación de la misma skill Alexa](alexa-custom/README.md).
 
 El botón **Descargar agente para Windows** sirve el instalador desde Azure. Copia `WoLPro-Agent-Setup.exe` de la Release del agente a `WOL_STATE_DIR/downloads/`; el panel muestra el botón cuando está disponible. Mientras no hayas subido el instalador, sigue funcionando el ZIP portátil existente en esa carpeta. Los usuarios no necesitan acceso a GitHub.
+
+Desde el agente 0.3.2 puedes activar un servicio que confirma la conexión del PC antes de iniciar sesión en Windows. El panel actualiza el estado cada cinco segundos y distingue conexión del PC y disponibilidad de las acciones de la sesión. Actualiza el backend, ejecuta `python migrate_db.py` y activa el servicio desde el agente con permisos de administrador. Las aplicaciones y comandos siguen ejecutándose dentro de la sesión del usuario.

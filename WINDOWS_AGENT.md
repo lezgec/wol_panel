@@ -2,6 +2,18 @@
 
 El agente [wolpro_agent](https://github.com/lezgec/wolpro_agent) abre aplicaciones autorizadas, inicia comandos CMD/PowerShell personalizados y permite apagar el PC con una cuenta atrás cancelable de 30 segundos. Funciona en la sesión de Windows; necesita estar abierto y tener Internet. Se conecta por HTTPS al servidor cada cinco segundos. No necesita puertos entrantes en casa. El encendido sigue usando la integración WoL existente.
 
+## Estado desde el arranque (agente 0.3.2)
+
+Actualiza el backend, ejecuta `python migrate_db.py` con su entorno Python activado y reinicia el servicio web. Añade la tabla `agent_presence` sin borrar cuentas, equipos, acciones ni vinculaciones. Copia el instalador 0.3.2 a la misma ruta de descargas; conserva `WOL_STATE_DIR` y la configuración Alexa.
+
+En Windows abre el agente vinculado y pulsa **Activar / actualizar servicio** en **Cuenta y vinculación**. Acepta UAC. Se instala `WoLProPresence` con inicio automático y cuenta `LocalService`; no guarda tu contraseña Windows ni activa el inicio de sesión automático. Sus binarios protegidos están en `%ProgramFiles%\WoL Pro\Presence`; la credencial limitada, cifrada con DPAPI de máquina y protegida por ACL, está en `%ProgramData%\WoLPro\Presence`. No copia los scripts ni el catálogo del usuario.
+
+El panel actualiza las tarjetas cada cinco segundos: **PC conectado · agente de sesión sin conexión** confirma comunicación desde el servicio; **PC conectado · control disponible** indica que el agente interactivo también responde. Las aplicaciones, comandos y apagado integrado siguen necesitando iniciar sesión y ejecutar ese agente. **Sin conexión** significa ausencia de comunicación reciente; no demuestra que el equipo esté apagado.
+
+Para verificar el caso real, reinicia voluntariamente tu PC y, sin iniciar sesión en él, abre el panel desde el teléfono. Necesita red disponible antes del inicio de sesión; un PIN BitLocker previo al arranque de Windows impide ejecutar el servicio.
+
+El servicio solo comunica presencia con una credencial distinta a la del agente: no puede consumir órdenes, autorizar comandos ni cambiar el catálogo. Comparte la caducidad de la vinculación (90 días); después de volver a vincular o actualizar el agente, pulsa **Activar / actualizar servicio** para renovar su configuración y copia protegida. Desvincular invalida también la credencial del servicio. **Desactivar servicio** revoca su acceso y pide UAC para retirar el componente local. El desinstalador solicita UAC para retirarlo si existe; si cancelas, el componente independiente queda instalado.
+
 ## Actualizar tu servidor Azure
 
 Dentro del checkout del servidor, con su entorno Python activado:
@@ -53,6 +65,9 @@ Todos los POST exigen JSON. Solo `pair/start` y `pair/poll` son públicos; el re
 | `pair/start` | Nombre del PC → códigos temporal público y privado |
 | `pair/poll` | Código privado → espera HTTP 428 o credencial una sola vez |
 | `heartbeat` | Catálogo de IDs/nombres y permiso local de apagado |
+| `presence/register` | Credencial limitada de conexión, solicitada por el agente vinculado |
+| `presence/heartbeat` | Confirma conexión; solo admite la credencial de servicio y JSON vacío |
+| `presence/revoke` | Retira la credencial de servicio desde el agente vinculado |
 | `commands/claim` | Recibir una orden y cancelaciones |
 | `commands/{id}/authorize` | Verificar vigencia/cancelación justo antes del efecto |
 | `commands/{id}/report` | Confirmar estado con comprobante privado de recepción |

@@ -94,3 +94,41 @@ document.querySelectorAll('[data-device-card]').forEach(card => {
 });
 window.addEventListener('hashchange', openSelectedCard);
 openSelectedCard();
+
+// Refresh connection only; preserve open forms and keep commands explicitly user initiated.
+if (document.querySelector('[data-pc-status]')) {
+    let checkingStatus = false;
+    async function refreshPcStatus() {
+        if (document.hidden || checkingStatus) return;
+        checkingStatus = true;
+        try {
+            const response = await fetch('/windows/status', {credentials: 'same-origin', cache: 'no-store', redirect: 'error'});
+            if (!response.ok) throw new Error('No se pudo consultar el estado.');
+            const data = await response.json();
+            document.querySelectorAll('[data-pc-status]').forEach(badge => {
+                const pc = data.devices[badge.dataset.pcStatus];
+                const ready = pc?.state === 'ready';
+                const connected = ready || pc?.state === 'connected';
+                badge.classList.toggle('is-online', connected);
+                badge.textContent = ready ? 'PC conectado · control disponible' : connected ? 'PC conectado · agente de sesión sin conexión' : pc?.active ? 'Sin conexión' : 'Sin vincular';
+                document.querySelectorAll('[data-pc-run]').forEach(button => {
+                    if (button.dataset.pcRun === badge.dataset.pcStatus) button.disabled = !ready;
+                });
+                const notice = document.querySelector('[data-pc-notice="' + badge.dataset.pcStatus + '"]');
+                if (notice) {
+                    notice.hidden = ready;
+                    notice.textContent = connected ? 'El PC está conectado. Inicia sesión en Windows y abre el agente para usar aplicaciones y comandos.' : 'No hay comunicación reciente. El PC puede estar apagado, suspendido, sin Internet o con el agente cerrado.';
+                }
+            });
+        } catch (_) {
+            document.querySelectorAll('[data-pc-status]').forEach(badge => {
+                badge.classList.remove('is-online');
+                badge.textContent = 'Estado sin actualizar';
+            });
+            document.querySelectorAll('[data-pc-run]').forEach(button => { button.disabled = true; });
+        }
+        finally { checkingStatus = false; }
+    }
+    setInterval(refreshPcStatus, 5000);
+    document.addEventListener('visibilitychange', refreshPcStatus);
+}
