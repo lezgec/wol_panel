@@ -1,4 +1,4 @@
-"""Skill Custom: puente Lambda firmado y acciones pertenecientes a la cuenta OAuth."""
+"""Modelo Custom de la misma skill WoL Pro: acciones de la cuenta OAuth."""
 import hashlib
 import hmac
 import os
@@ -22,7 +22,7 @@ def register_custom(bp, service, state_connection, rate_allowed, audit):
     @bp.post('/alexa/custom')
     def alexa_custom():
         secret = os.environ.get('ALEXA_BRIDGE_SECRET', '')
-        skill_id = os.environ.get('ALEXA_CUSTOM_SKILL_ID', '')
+        skill_id = os.environ.get('ALEXA_SKILL_ID') or os.environ.get('ALEXA_CUSTOM_SKILL_ID', '')
         if len(secret) < 32 or not skill_id:
             return jsonify(error='skill_not_configured'), 503
         stamp = request.headers.get('X-Wol-Timestamp', '')

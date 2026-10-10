@@ -16,11 +16,11 @@ La migración añade cinco tablas `agent_*` y conserva las cuentas/equipos exist
 
 ```dotenv
 ENABLE_WINDOWS_AGENT=1
-# Completar cuando crees la nueva skill Custom:
-ALEXA_CUSTOM_SKILL_ID=
+# Skill ID existente de WoL Pro, al habilitar su modelo Custom:
+ALEXA_SKILL_ID=
 ```
 
-Reinicia **el servicio que ya utilizas para WoL Pro**. El control Windows aparecerá en el panel. No cambies el endpoint `/alexa/smarthome` ni su Lambda para mantener el encendido actual. Si necesitas desactivar el nuevo control, vuelve a `ENABLE_WINDOWS_AGENT=0` y reinicia; no elimines tablas.
+Reinicia **el servicio que ya utilizas para WoL Pro**. El control Windows aparecerá en el panel. Conserva el endpoint `/alexa/smarthome`. Para ampliar Alexa, actualiza el código de su Lambda existente como se indica abajo. Si necesitas desactivar el nuevo control, vuelve a `ENABLE_WINDOWS_AGENT=0` y reinicia; no elimines tablas.
 
 ## Vincular y crear órdenes
 
@@ -36,9 +36,9 @@ Las órdenes caducan a los 60 segundos. Una orden recibida nunca se vuelve a pon
 
 ## Alexa
 
-**Apagar y abrir aplicaciones:** la nueva skill Custom ejecuta las acciones del panel, incluidos los apagados autorizados en Windows. Una rutina puede asociar «Alexa, apaga mi PC» a la acción «Apagar mi PC». El acuse de la skill confirma que se envió la orden; consulta en el panel si el agente la recibió o canceló. Enviar y cancelar órdenes también funciona desde el navegador sin Alexa.
+**Una sola skill WoL Pro:** amplía la skill existente a Multi-capability Skill (MCS). Su modelo Smart Home conserva el encendido y su modelo Custom ejecuta las acciones del panel, incluidos los apagados autorizados en Windows. Una rutina puede asociar «Alexa, apaga mi PC» a la acción «Apagar mi PC». El acuse de la skill confirma que se envió la orden; consulta en el panel si el agente la recibió o canceló. Enviar y cancelar órdenes también funciona desde el navegador sin Alexa.
 
-Configura la skill **Custom** adicional siguiendo [alexa-custom/README.md](alexa-custom/README.md). Allí están la Lambda, modelos en español, configuración OAuth y tarea para rutinas. La frase «Alexa, abre Spotify en mi PC» se asocia a una rutina del usuario. No se reserva una frase global para todas las cuentas. La skill Smart Home conserva su encendido actual; las órdenes nativas `TurnOff` siguen rechazándose, ya que programar una cuenta atrás no permite confirmar que el PC esté apagado.
+Añade el modelo **Custom a la misma skill** siguiendo [alexa-custom/README.md](alexa-custom/README.md). Allí están las instrucciones para reutilizar el Skill ID, la Lambda y la vinculación OAuth existentes, modelos en español y tarea para rutinas. La frase «Alexa, abre Spotify en mi PC» se asocia a una rutina del usuario. Las órdenes nativas Smart Home `TurnOff` siguen rechazándose, ya que programar una cuenta atrás no permite confirmar que el PC esté apagado; el apagado se pide mediante una acción del modelo Custom de WoL Pro.
 
 ## API del agente
 

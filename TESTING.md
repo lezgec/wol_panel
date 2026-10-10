@@ -75,9 +75,10 @@ CSRF, propietario, catálogo permitido, revocación, cola sin repetición, caduc
 reportes, cancelación y comprobación final de autorización. La integración real
 verifica además solicitudes simultáneas para que una orden tenga un único
 consumidor. Las pruebas Custom cubren firma Lambda, ID de skill, intents y tareas
-para rutinas. El SQL se aplica a una base vacía y se reejecuta sin borrar datos.
+para rutinas. Una prueba MCS recorre la Lambda única y los dos endpoints, con el
+mismo token de cuenta, tanto en SQLite como en MariaDB. El SQL se aplica a una base vacía y se reejecuta sin borrar datos.
 
-La suite completa de esta entrega contiene 232 comprobaciones Python (incluye
+La suite completa de esta entrega contiene 234 comprobaciones Python (incluye
 flujos compartidos ejecutados con SQLite y MariaDB 10.11.14). El agente separado
 tiene 22 pruebas .NET y compilación Release sin advertencias. Su vista de
 verificación comprueba DPAPI y dibuja la ventana sin usar credenciales reales ni

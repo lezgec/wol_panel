@@ -1,8 +1,9 @@
-"""Puente para una skill Alexa Smart Home con endpoint AWS Lambda.
+"""Puente único para WoL Pro: modelos Smart Home y Custom en la misma skill.
 
 Configura WOL_BACKEND_URL=https://tu-dominio/alexa/smarthome y
 ALEXA_BRIDGE_SECRET con la misma clave privada que el backend.
-No requiere paquetes adicionales. El token de la directiva llega intacto al backend.
+Sube también lambda_custom.py al mismo paquete Lambda para el modelo Custom.
+No requiere paquetes adicionales. Los tokens llegan intactos al backend.
 """
 import json
 import os
@@ -15,6 +16,9 @@ import time
 
 
 def lambda_handler(event, context):
+    if isinstance(event, dict) and 'directive' not in event and isinstance(event.get('request'), dict):
+        from lambda_custom import lambda_handler as handle_custom
+        return handle_custom(event, context)
     url = os.environ.get('WOL_BACKEND_URL', '')
     if not url.startswith('https://'):
         raise RuntimeError('Configura WOL_BACKEND_URL con la URL HTTPS del backend.')

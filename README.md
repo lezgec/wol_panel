@@ -48,4 +48,4 @@ Más detalles en [TESTING.md](TESTING.md).
 
 El [agente Windows](https://github.com/lezgec/wolpro_agent) permite vincular un PC mediante tu cuenta, abrir aplicaciones autorizadas y apagarlo con una cuenta atrás cancelable. El panel incorpora acciones e historial; Alexa puede usar las mismas órdenes.
 
-Para activarlo en Azure, ejecuta `python migrate_db.py`, añade `ENABLE_WINDOWS_AGENT=1` al `.env` existente y reinicia tu servicio. Consulta los pasos en [WINDOWS_AGENT.md](WINDOWS_AGENT.md) y la [skill de acciones Alexa](alexa-custom/README.md).
+Para activarlo en Azure, ejecuta `python migrate_db.py`, añade `ENABLE_WINDOWS_AGENT=1` al `.env` existente y reinicia tu servicio. Consulta los pasos en [WINDOWS_AGENT.md](WINDOWS_AGENT.md) y la [ampliación de la misma skill Alexa](alexa-custom/README.md).

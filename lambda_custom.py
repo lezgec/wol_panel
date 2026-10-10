@@ -1,4 +1,4 @@
-"""Lambda de la skill Custom; handler lambda_custom.lambda_handler."""
+"""Puente del modelo Custom; lo invoca la Lambda única lambda_function."""
 import hashlib
 import hmac
 import json
@@ -6,7 +6,7 @@ import os
 import time
 import urllib.error
 import urllib.request
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -15,11 +15,14 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def lambda_handler(event, context):
-    url = os.environ.get('WOL_CUSTOM_BACKEND_URL', '')
+    base = urlsplit(os.environ.get('WOL_BACKEND_URL', ''))
+    if base.path != '/alexa/smarthome':
+        raise RuntimeError('Configura WOL_BACKEND_URL con el endpoint HTTPS /alexa/smarthome.')
+    url = urlunsplit((base.scheme, base.netloc, '/alexa/custom', base.query, base.fragment))
     parsed = urlsplit(url)
     secret = os.environ.get('ALEXA_BRIDGE_SECRET', '')
     if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.query or parsed.fragment or parsed.path != '/alexa/custom' or len(secret) < 32:
-        raise RuntimeError('Configura WOL_CUSTOM_BACKEND_URL y ALEXA_BRIDGE_SECRET.')
+        raise RuntimeError('Configura el endpoint HTTPS de WoL Pro y ALEXA_BRIDGE_SECRET.')
     body = json.dumps(event).encode()
     stamp = str(int(time.time()))
     signature = hmac.new(secret.encode(), stamp.encode()+b'.'+body, hashlib.sha256).hexdigest()

@@ -149,7 +149,7 @@ class AgentFlowTests(base.ApplicationTests):
         self.client.post('/windows/actions',data={'csrf_token':self.csrf(),'name':'Spotify en mi PC','kind':'launch','agent_id':self.agent['id'],'app_key':self.app_key})
         with self.module.state_connection() as db: db.execute('INSERT INTO auth_tokens VALUES (?,?,?,?,?)',('custom-access','custom-refresh','1','test-client',time.time()+600))
         envelope={'context':{'System':{'application':{'applicationId':'test-skill'},'user':{'accessToken':'custom-access'}}},'request':{'type':'LaunchRequest','requestId':'request-1','timestamp':datetime.now(timezone.utc).isoformat(),'task':{'name':'test-skill.ExecuteAction','version':'1','input':{'action':'Spotify en mi PC'}}}}
-        with patch.dict(os.environ,ALEXA_BRIDGE_SECRET='x'*32,ALEXA_CUSTOM_SKILL_ID='test-skill'):
+        with patch.dict(os.environ,ALEXA_BRIDGE_SECRET='x'*32,ALEXA_SKILL_ID='test-skill'):
             self.assertEqual(self.custom_request(envelope,False).status_code,401)
             for _ in range(2):
                 response=self.custom_request(envelope)
@@ -173,7 +173,7 @@ class AgentFlowTests(base.ApplicationTests):
         self.client.post('/windows/actions',data={'csrf_token':self.csrf(),'name':'Apagar mi PC','kind':'shutdown','agent_id':self.agent['id']})
         with self.module.state_connection() as db: db.execute('INSERT INTO auth_tokens VALUES (?,?,?,?,?)',('custom-access','custom-refresh','1','test-client',time.time()+600))
         envelope={'context':{'System':{'application':{'applicationId':'test-skill'},'user':{'accessToken':'custom-access'}}},'request':{'type':'IntentRequest','requestId':'request-shutdown','timestamp':datetime.now(timezone.utc).isoformat(),'intent':{'name':'ExecuteActionIntent','slots':{'action':{'value':'Apagar mi PC'}}}}}
-        with patch.dict(os.environ,ALEXA_BRIDGE_SECRET='x'*32,ALEXA_CUSTOM_SKILL_ID='test-skill'):
+        with patch.dict(os.environ,ALEXA_BRIDGE_SECRET='x'*32,ALEXA_SKILL_ID='test-skill'):
             self.assertIn('Orden enviada',self.custom_request(envelope).get_json()['response']['outputSpeech']['text'])
             self.assertEqual(self.service.claim(self.agent)['command']['kind'],'shutdown')
             envelope['context']['System']['application']['applicationId']='wrong-skill'
@@ -192,16 +192,41 @@ class AgentFlowTests(base.ApplicationTests):
 
     def test_agent_custom_lambda_signed_payload_and_failure(self):
         import lambda_custom
+        import lambda_function
         event={'request':{'type':'LaunchRequest','task':{'name':'test-skill.ExecuteAction'}}}
-        with patch.dict(os.environ,ALEXA_BRIDGE_SECRET='x'*32,WOL_CUSTOM_BACKEND_URL='https://backend.example/alexa/custom'), patch.object(lambda_custom.urllib.request,'build_opener') as build:
+        with patch.dict(os.environ,ALEXA_BRIDGE_SECRET='x'*32,WOL_BACKEND_URL='https://backend.example/alexa/smarthome'), patch.object(lambda_custom.urllib.request,'build_opener') as build:
             build.return_value.open.side_effect=TimeoutError
-            response=lambda_custom.lambda_handler(event,None)
+            response=lambda_function.lambda_handler(event,None)
             self.assertEqual(response['response']['directives'][0]['status']['code'],'500')
             outgoing=build.return_value.open.call_args.args[0]
+            self.assertEqual(outgoing.full_url,'https://backend.example/alexa/custom')
             signature=hmac.new(('x'*32).encode(),outgoing.get_header('X-wol-timestamp').encode()+b'.'+outgoing.data,hashlib.sha256).hexdigest()
             self.assertEqual(outgoing.get_header('X-wol-signature'),signature)
             self.assertEqual(json.loads(outgoing.data),event)
             self.assertEqual(build.return_value.open.call_args.kwargs['timeout'],6)
+
+    def test_agent_one_lambda_both_models_same_linked_account(self):
+        import lambda_function
+        from urllib.parse import urlsplit
+        self.pair()
+        self.client.post('/windows/actions',data={'csrf_token':self.csrf(),'name':'Spotify en mi PC','kind':'launch','agent_id':self.agent['id'],'app_key':self.app_key})
+        token=self.token()
+        envelope={'context':{'System':{'application':{'applicationId':'same-skill'},'user':{'accessToken':token}}},'request':{'type':'IntentRequest','requestId':'shared-request','timestamp':datetime.now(timezone.utc).isoformat(),'intent':{'name':'ExecuteActionIntent','slots':{'action':{'value':'Spotify en mi PC'}}}}}
+        with patch.dict(os.environ,ALEXA_SKILL_ID='same-skill',ALEXA_BRIDGE_SECRET='s'*32,WOL_BACKEND_URL='https://backend.example/alexa/smarthome'), patch('lambda_custom.urllib.request.build_opener') as build, patch('lambda_function.urllib.request.urlopen',side_effect=TimeoutError) as smart:
+            build.return_value.open.side_effect=TimeoutError
+            lambda_function.lambda_handler(envelope,None)
+            outgoing=build.return_value.open.call_args.args[0]
+            response=self.client.post(urlsplit(outgoing.full_url).path,data=outgoing.data,headers=dict(outgoing.header_items()))
+            self.assertEqual(response.status_code,200)
+            self.assertIn('Orden enviada',response.get_json()['response']['outputSpeech']['text'])
+            smart.assert_not_called()
+            lambda_function.lambda_handler(self.directive(token,'Discover',namespace='Alexa.Discovery'),None)
+            outgoing=smart.call_args.args[0]
+            self.assertEqual(outgoing.full_url,'https://backend.example/alexa/smarthome')
+            response=self.client.post(urlsplit(outgoing.full_url).path,data=outgoing.data,headers=dict(outgoing.header_items()))
+            self.assertEqual(response.status_code,200)
+            self.assertEqual(response.get_json()['event']['header']['name'],'Discover.Response')
+            self.assertEqual(self.service.first('SELECT user_id FROM agent_commands')['user_id'],1)
 
 
 if __name__ == '__main__':
