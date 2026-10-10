@@ -18,7 +18,7 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.utils import parseaddr
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 
@@ -38,6 +38,7 @@ app.secret_key = os.environ.get('FLASK_SECRET_KEY') or secret_path.read_text().s
 app.config['SESSION_COOKIE_SECURE'] = os.environ.get('COOKIE_SECURE', '0') == '1'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
 from production_config import configure
 configure(app)
 app.config['WINDOWS_AGENT_DOWNLOAD_PATH'] = os.environ.get('WOL_AGENT_DOWNLOAD_PATH') or str(STATE_DIR / 'downloads' / 'WoLPro-Agent-Setup.exe')
@@ -59,6 +60,15 @@ with state_connection() as state_db:
     state_db.execute('CREATE TABLE IF NOT EXISTS auth_tokens (access_token TEXT PRIMARY KEY, refresh_token TEXT UNIQUE NOT NULL, user_id TEXT NOT NULL, client_id TEXT NOT NULL, expires REAL NOT NULL)')
     state_db.execute('CREATE TABLE IF NOT EXISTS challenges (id TEXT PRIMARY KEY, email TEXT NOT NULL, purpose TEXT NOT NULL, code_hash TEXT NOT NULL, expires REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0)')
     state_db.execute('CREATE TABLE IF NOT EXISTS rate_limits (key TEXT PRIMARY KEY, count INTEGER NOT NULL, expires REAL NOT NULL)')
+    state_db.execute('CREATE TABLE IF NOT EXISTS mobile_sessions (id_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires REAL NOT NULL)')
+
+
+def revoke_mobile_session():
+    identifier = session.pop('mobile_session_id', None)
+    if isinstance(identifier, str):
+        with state_connection() as db:
+            db.execute('DELETE FROM mobile_sessions WHERE id_hash=?', (hashlib.sha256(identifier.encode()).hexdigest(),))
+    session.permanent = False
 
 def rate_allowed(bucket, identity, limit, seconds):
     key = hashlib.sha256((bucket + ':' + identity).encode()).hexdigest()
@@ -75,7 +85,7 @@ def rate_allowed(bucket, identity, limit, seconds):
 REQUEST_LIMITS = {'login': (15, 60), 'oauth_authorize': (15, 60), 'oauth_token': (120, 60),
                   'register': (5, 900), 'forgot_password': (5, 900), 'wake_device': (12, 60),
                   'add_device': (30, 60), 'update_device_settings': (30, 60), 'edit_device': (30, 60), 'mobile_wake': (12, 60),
-                  'mobile_create_device': (30, 60), 'mobile_update_device': (30, 60)}
+                  'mobile_create_device': (30, 60), 'mobile_update_device': (30, 60), 'mobile_remember_session': (30, 60)}
 
 def create_challenge(email, purpose, code):
     challenge_id = secrets.token_urlsafe(32)
@@ -106,6 +116,18 @@ app.jinja_env.globals['csrf_token'] = csrf_token
 
 @app.before_request
 def protect_forms():
+    # Remembered mobile cookies also require a live server-side session record.
+    identifier = session.get('mobile_session_id')
+    if identifier is not None:
+        row = None
+        if isinstance(identifier, str):
+            with state_connection() as db:
+                row = db.execute('SELECT user_id,expires FROM mobile_sessions WHERE id_hash=?', (hashlib.sha256(identifier.encode()).hexdigest(),)).fetchone()
+        if not row or row['user_id'] != str(session.get('user_id')) or row['expires'] <= time.time():
+            session.clear()
+            if request.path.startswith('/api/mobile/v1/'):
+                return jsonify(error='authentication_required', message='Tu sesión caducó. Inicia sesión nuevamente.'), 401
+            return redirect(url_for('login'))
     # Estas rutas verifican Bearer o firma del puente; no usan la sesión web.
     if request.endpoint and request.endpoint.startswith('windows.') and (request.path.startswith('/api/agent/v1/') or request.endpoint == 'windows.alexa_custom'):
         return
@@ -559,6 +581,7 @@ def terms_of_use():
 
 @app.route('/logout')
 def logout():
+    revoke_mobile_session()
     if 'user_id' in session:
         log_action(session['user_id'], "LOGOUT", "Cierre de sesión")
     session.clear()
@@ -618,7 +641,10 @@ def mobile_devices():
     rows = database.fetch_all('SELECT id, name, mac, wake_method, wake_host, wake_port FROM devices WHERE user_sub = %s ORDER BY id', (str(session['user_id']),))
     devices = [dict(id=row[0], name=row[1], mac=row[2], wake_method=row[3],
                     can_wake=False) for row in rows]
-    return jsonify(version=1, devices=devices, email=session.get('email'),
+    states = agent_service.connection_states(session['user_id']) if app.config['ENABLE_WINDOWS_AGENT'] else {}
+    for device in devices:
+        device['agent_state'] = states.get(device['id'], {}).get('state', 'unlinked')
+    return jsonify(version=1, devices=devices, email=session.get('email'), remembered=bool(session.get('mobile_session_id')),
                    alexa_ready=alexa_gateway.is_linked(str(session['user_id'])), csrf_token=csrf_token())
 
 
@@ -663,8 +689,34 @@ def mobile_update_device(device_id):
 @app.route('/api/mobile/v1/logout', methods=['POST'])
 def mobile_logout():
     log_action(session['user_id'], 'LOGOUT', 'Cierre de sesión desde app')
+    revoke_mobile_session()
     session.clear()
     return jsonify(message='Sesión cerrada.')
+
+
+@app.post('/api/mobile/v1/session/remember')
+def mobile_remember_session():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or type(data.get('enabled')) is not bool:
+        return jsonify(error='invalid_input', message='Selecciona si deseas conservar la sesión.'), 400
+    revoke_mobile_session()
+    if data['enabled']:
+        identifier = secrets.token_urlsafe(32)
+        with state_connection() as db:
+            db.execute('DELETE FROM mobile_sessions WHERE expires<=?', (time.time(),))
+            db.execute('INSERT INTO mobile_sessions VALUES (?,?,?)', (hashlib.sha256(identifier.encode()).hexdigest(), str(session['user_id']), time.time()+30*86400))
+        session['mobile_session_id'] = identifier
+        session.permanent = True
+    return mobile_devices()
+
+
+@app.route('/api/mobile/v1/devices/<int:device_id>', methods=['DELETE'])
+def mobile_delete_device(device_id):
+    count = database.execute('DELETE FROM devices WHERE id=%s AND user_sub=%s', (device_id, str(session['user_id'])))
+    if not count:
+        return jsonify(error='device_not_found', message='Dispositivo no encontrado.'), 404
+    log_action(session['user_id'], 'DELETE_DEVICE', f'Dispositivo eliminado desde app: {device_id}')
+    return mobile_devices()
 
 
 @app.route('/api/mobile/v1/devices/<int:device_id>/wake', methods=['POST'])
@@ -952,6 +1004,8 @@ def alexa_smarthome():
 
 from windows_agent import install as install_windows_agent
 agent_service = install_windows_agent(app, database, state_connection, rate_allowed, log_action, render_dashboard)
+from mobile_control import install as install_mobile_control
+install_mobile_control(app, agent_service, database, rate_allowed, log_action)
 
 if __name__ == '__main__':
     from waitress import serve
