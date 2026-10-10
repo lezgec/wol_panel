@@ -2,9 +2,9 @@
 
 El agente [wolpro_agent](https://github.com/lezgec/wolpro_agent) abre aplicaciones autorizadas, inicia comandos CMD/PowerShell personalizados y permite apagar el PC con una cuenta atrás cancelable de 30 segundos. Funciona en la sesión de Windows; necesita estar abierto y tener Internet. Se conecta por HTTPS al servidor cada cinco segundos. No necesita puertos entrantes en casa. El encendido sigue usando la integración WoL existente.
 
-## Estado desde el arranque (agente 0.3.2)
+## Estado desde el arranque (agente 0.3.3)
 
-Actualiza el backend, ejecuta `python migrate_db.py` con su entorno Python activado y reinicia el servicio web. Añade la tabla `agent_presence` sin borrar cuentas, equipos, acciones ni vinculaciones. Copia el instalador 0.3.2 a la misma ruta de descargas; conserva `WOL_STATE_DIR` y la configuración Alexa.
+Actualiza el backend, ejecuta `python migrate_db.py` con su entorno Python activado y reinicia el servicio web. Añade la tabla `agent_presence` sin borrar cuentas, equipos, acciones ni vinculaciones. Copia el instalador 0.3.3 a la misma ruta de descargas; conserva `WOL_STATE_DIR` y la configuración Alexa.
 
 En Windows abre el agente vinculado y pulsa **Activar / actualizar servicio** en **Cuenta y vinculación**. Acepta UAC. Se instala `WoLProPresence` con inicio automático y cuenta `LocalService`; no guarda tu contraseña Windows ni activa el inicio de sesión automático. Sus binarios protegidos están en `%ProgramFiles%\WoL Pro\Presence`; la credencial limitada, cifrada con DPAPI de máquina y protegida por ACL, está en `%ProgramData%\WoLPro\Presence`. No copia los scripts ni el catálogo del usuario.
 
