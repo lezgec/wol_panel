@@ -29,6 +29,7 @@ class AgentError(Exception):
 class AgentService:
     def __init__(self, database):
         self.db = database
+        self.plans = None
 
     @staticmethod
     def rows(cursor, sql, params=()):
@@ -76,10 +77,14 @@ class AgentService:
         pair = self.pairing(code)
         with self.db.connection() as conn, conn.cursor() as c:
             if device_id:
+                if self.plans:
+                    self.plans.require(user_id, device_id, cursor=c)
                 rows = self.rows(c, 'SELECT id FROM devices WHERE id=%s AND user_sub=%s', (device_id, user_id))
                 if not rows:
                     raise AgentError('not_found', 'Equipo no encontrado.', 404)
             else:
+                if self.plans:
+                    self.plans.registration_guard(c, user_id)
                 name = text(new_name)
                 clean = mac.strip().replace(':', '').replace('-', '')
                 if not re.fullmatch(r'[a-fA-F0-9]{12}', clean):
@@ -142,7 +147,7 @@ class AgentService:
                 c.execute('DELETE FROM agent_apps WHERE agent_id=%s', (agent['id'],))
                 for key, name in clean:
                     c.execute('INSERT INTO agent_apps (agent_id,app_key,name) VALUES (%s,%s,%s)', (agent['id'], key, name))
-        return dict(email=agent['email'], computer_name=agent['computer_name'])
+        return dict(email=agent['email'], computer_name=agent['computer_name'], plan={**self.plans.snapshot(agent['user_id']), 'device_active': agent['device_id'] in self.plans.active_devices(agent['user_id'])} if self.plans else None)
 
     def register_presence(self, agent):
         token = secrets.token_urlsafe(48)
@@ -169,11 +174,15 @@ class AgentService:
         now = int(time.time())
         rows = self.all('SELECT a.device_id,a.expires,a.revoked,a.last_seen,p.last_seen AS boot_last_seen,p.expires AS boot_expires FROM agent_connections a LEFT JOIN agent_presence p ON p.agent_id=a.id WHERE a.user_id=%s', (user,))
         result = {}
+        active_devices = self.plans.active_devices(user) if self.plans else None
+        plan = self.plans.snapshot(user) if self.plans else None
         for row in rows:
             active = not row['revoked'] and row['expires'] > now
             interactive = active and row['last_seen'] >= now-20
             boot_online = active and (row['boot_expires'] or 0) > now and (row['boot_last_seen'] or 0) >= now-20
             result[row['device_id']] = dict(active=active, online=interactive, pc_online=interactive or boot_online,
+                plan_active=row['device_id'] in active_devices if active_devices is not None else True,
+                can_launch=plan['can_launch'] if plan else True,
                 state='ready' if interactive else 'connected' if boot_online else 'offline' if active else 'unlinked',
                 last_seen=max(row['last_seen'], row['boot_last_seen'] or 0) if active else None)
         return result
@@ -185,6 +194,8 @@ class AgentService:
             if not rows:
                 raise AgentError('not_found', 'Agente no encontrado.', 404)
             agent = rows[0]
+            if self.plans:
+                self.plans.require(user_id, agent['device_id'], kind, c)
             if agent['last_seen'] < now-20:
                 raise AgentError('offline', 'El PC está desconectado o el agente no está abierto.', 409)
             if kind == 'shutdown':
@@ -409,6 +420,11 @@ def install(app, database, state_connection, rate_allowed, audit, render_dashboa
             allowed = allowed and bool(current['allow_shutdown'])
         else:
             allowed = allowed and bool(service.first('SELECT app_key FROM agent_apps WHERE agent_id=%s AND app_key=%s', (current['id'], row['app_key'])))
+        if allowed and service.plans:
+            try:
+                service.plans.require(current['user_id'], current['device_id'], row['kind'])
+            except AgentError:
+                allowed = False
         return jsonify(allowed=allowed)
 
     @bp.post('/api/agent/v1/unlink')
@@ -456,6 +472,8 @@ def install(app, database, state_connection, rate_allowed, audit, render_dashboa
         linked = service.first('SELECT * FROM agent_connections WHERE id=%s AND user_id=%s AND revoked=0 AND expires>%s', (agent_id, user, int(time.time())))
         if not linked:
             raise AgentError('not_found', 'Selecciona un PC vinculado.', 404)
+        if service.plans:
+            service.plans.require(user, linked['device_id'], kind)
         key = request.form.get('app_key') if kind == 'launch' else None
         if kind == 'launch':
             if not service.first('SELECT app_key FROM agent_apps WHERE agent_id=%s AND app_key=%s', (agent_id, key)):

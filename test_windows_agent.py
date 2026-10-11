@@ -382,6 +382,7 @@ class AgentFlowTests(base.ApplicationTests):
             self.assertEqual(response['response']['directives'][0]['status']['code'],'500')
             outgoing=build.return_value.open.call_args.args[0]
             self.assertEqual(outgoing.full_url,'https://backend.example/alexa/custom')
+            self.assertEqual(outgoing.get_header('User-agent'),'WoLPro-Alexa-Bridge/1.0')
             signature=hmac.new(('x'*32).encode(),outgoing.get_header('X-wol-timestamp').encode()+b'.'+outgoing.data,hashlib.sha256).hexdigest()
             self.assertEqual(outgoing.get_header('X-wol-signature'),signature)
             self.assertEqual(json.loads(outgoing.data),event)
@@ -409,6 +410,121 @@ class AgentFlowTests(base.ApplicationTests):
             self.assertEqual(response.status_code,200)
             self.assertEqual(response.get_json()['event']['header']['name'],'Discover.Response')
             self.assertEqual(self.service.first('SELECT user_id FROM agent_commands')['user_id'],1)
+
+    def mobile_headers(self):
+        return {'X-CSRF-Token': self.csrf()}
+
+    def test_mobile_control_scope_secrets_and_presence(self):
+        self.assertEqual(self.client.get('/api/mobile/v1/control').status_code, 401)
+        self.pair()
+        response = self.client.get('/api/mobile/v1/control')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers['Cache-Control'], 'no-store')
+        pc = response.json['pcs'][0]
+        self.assertEqual(pc['device_id'], 1)
+        self.assertTrue(pc['online'])
+        self.assertEqual(pc['state'], 'ready')
+        self.assertEqual(pc['apps'][0]['name'], 'Spotify')
+        self.assertNotIn('token_hash', response.get_data(as_text=True))
+        self.assertNotIn('nonce', pc)
+        self.assertEqual(self.client.get('/api/mobile/v1/devices').json['devices'][0]['agent_state'], 'ready')
+        self.module.database.execute('UPDATE agent_connections SET last_seen=0')
+        registration = self.client.post('/api/agent/v1/presence/register', headers=self.headers, json={}).json
+        self.client.post('/api/agent/v1/presence/heartbeat', headers={'Authorization': 'Bearer '+registration['access_token']}, json={})
+        pc = self.client.get('/api/mobile/v1/control').json['pcs'][0]
+        self.assertEqual(pc['state'], 'connected')
+        self.assertFalse(pc['online'])
+        self.assertTrue(pc['pc_online'])
+        with self.client.session_transaction() as session:
+            session['user_id'] = 2
+        self.assertEqual(self.client.get('/api/mobile/v1/control').json['pcs'], [])
+
+    def test_mobile_run_idempotent_authorized_and_claimable(self):
+        self.pair()
+        payload = {'kind':'launch', 'app_key':self.app_key, 'request_id':str(uuid.uuid4())}
+        route = '/api/mobile/v1/control/devices/1/run'
+        self.assertEqual(self.client.post(route, json=payload).status_code, 400)
+        headers = self.mobile_headers()
+        self.assertEqual(self.client.post('/api/mobile/v1/control/devices/2/run', headers=headers, json=payload).status_code, 404)
+        bad = self.client.post(route, headers=headers, json={**payload, 'app_key':str(uuid.uuid4())})
+        self.assertEqual(bad.status_code, 409)
+        self.assertEqual(self.client.post(route, headers=headers, json={**payload, 'request_id':'bad'}).status_code, 400)
+        first = self.client.post(route, headers=headers, json=payload)
+        second = self.client.post(route, headers=headers, json=payload)
+        self.assertEqual(first.status_code, 202)
+        self.assertEqual(first.json['command_id'], second.json['command_id'])
+        self.assertEqual(len(self.service.all('SELECT * FROM agent_commands')), 1)
+        public = self.client.get('/api/mobile/v1/control').json['pcs'][0]['commands'][0]
+        self.assertNotIn('claim_hash', public)
+        self.assertNotIn('dedupe_hash', public)
+        claimed = self.client.post('/api/agent/v1/commands/claim', headers=self.headers, json={}).json['command']
+        self.assertEqual(claimed['id'], first.json['command_id'])
+        self.assertEqual(claimed['app_key'], self.app_key)
+        self.assertEqual(self.client.post('/api/mobile/v1/control/commands/'+claimed['id']+'/cancel', headers=headers).status_code, 409)
+
+    def test_mobile_offline_and_revoked_catalog(self):
+        self.pair()
+        headers = self.mobile_headers()
+        self.module.database.execute('UPDATE agent_connections SET last_seen=0')
+        payload = {'kind':'launch', 'app_key':self.app_key, 'request_id':str(uuid.uuid4())}
+        self.assertEqual(self.client.post('/api/mobile/v1/control/devices/1/run', headers=headers, json=payload).status_code, 409)
+        self.module.database.execute('UPDATE agent_connections SET last_seen=%s,allow_shutdown=0', (int(time.time()),))
+        self.assertEqual(self.client.post('/api/mobile/v1/control/devices/1/run', headers=headers, json={**payload,'kind':'shutdown'}).status_code, 409)
+        self.assertEqual(self.client.delete('/api/mobile/v1/control/devices/2/agent', headers=headers).status_code, 404)
+        self.assertEqual(self.client.delete('/api/mobile/v1/control/devices/1/agent', headers=headers).status_code, 200)
+        pc = self.client.get('/api/mobile/v1/control').json['pcs'][0]
+        self.assertFalse(pc['active'])
+        self.assertEqual(pc['apps'], [])
+        self.assertEqual(self.client.post('/api/agent/v1/heartbeat', headers=self.headers, json={'allow_shutdown':True,'apps':[]}).status_code, 401)
+
+    def test_mobile_cancel_pending_and_shutdown_only(self):
+        self.pair()
+        headers = self.mobile_headers()
+        command_id = self.command()
+        route = '/api/mobile/v1/control/commands/'+command_id+'/cancel'
+        with self.client.session_transaction() as session:
+            session['user_id'] = 2
+        self.assertEqual(self.client.post(route, headers=headers).status_code, 404)
+        with self.client.session_transaction() as session:
+            session['user_id'] = 1
+        self.assertEqual(self.client.post(route, headers=headers).status_code, 200)
+        self.assertEqual(self.service.first('SELECT status FROM agent_commands WHERE id=%s', (command_id,))['status'], 'cancelled')
+        shutdown_id = self.command('shutdown')
+        self.client.post('/api/agent/v1/commands/claim', headers=self.headers, json={})
+        self.assertEqual(self.client.post('/api/mobile/v1/control/commands/'+shutdown_id+'/cancel', headers=headers).status_code, 200)
+        claim = self.client.post('/api/agent/v1/commands/claim', headers=self.headers, json={}).json
+        self.assertIn(shutdown_id, claim['cancel_commands'])
+
+    def test_mobile_pair_preview_confirm_and_actions(self):
+        self.login()
+        headers = self.mobile_headers()
+        started = self.client.post('/api/agent/v1/pair/start', json={'computer_name':'PC de prueba'}).json
+        self.assertEqual(self.client.post('/api/mobile/v1/control/pair/preview', headers=headers, json={'code':started['user_code']}).json['computer_name'], 'PC de prueba')
+        self.assertEqual(self.client.post('/api/mobile/v1/control/devices/2/pair', headers=headers, json={'code':started['user_code']}).status_code, 404)
+        self.assertEqual(self.client.post('/api/mobile/v1/control/devices/1/pair', headers=headers, json={'code':started['user_code']}).status_code, 200)
+        self.assertEqual(self.client.post('/api/mobile/v1/control/devices/1/pair', headers=headers, json={'code':started['user_code']}).status_code, 400)
+        creds = self.client.post('/api/agent/v1/pair/poll', json={'device_code':started['device_code']}).json
+        self.client.post('/api/agent/v1/heartbeat', headers={'Authorization':'Bearer '+creds['access_token']}, json={'allow_shutdown':True,'apps':[{'id':self.app_key,'name':'Spotify'}]})
+        created = self.client.post('/api/mobile/v1/control/devices/1/actions', headers=headers, json={'kind':'launch','name':'Abrir Spotify','app_key':self.app_key})
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(self.client.get('/api/mobile/v1/control').json['pcs'][0]['actions'][0]['name'], 'Abrir Spotify')
+        route = '/api/mobile/v1/control/actions/'+created.json['action_id']
+        with self.client.session_transaction() as session:
+            session['user_id'] = 2
+        self.assertEqual(self.client.delete(route, headers=headers).status_code, 404)
+        with self.client.session_transaction() as session:
+            session['user_id'] = 1
+        self.assertEqual(self.client.delete(route, headers=headers).status_code, 200)
+        with patch.dict(self.module.app.config, ENABLE_WINDOWS_AGENT=False):
+            self.assertEqual(self.client.get('/api/mobile/v1/control').status_code, 404)
+
+    def test_mobile_delete_device_scoped_and_csrf(self):
+        self.login()
+        self.assertEqual(self.client.delete('/api/mobile/v1/devices/1').status_code, 400)
+        headers = self.mobile_headers()
+        self.assertEqual(self.client.delete('/api/mobile/v1/devices/2', headers=headers).status_code, 404)
+        self.assertEqual(self.client.delete('/api/mobile/v1/devices/1', headers=headers).status_code, 200)
+        self.assertEqual(self.client.get('/api/mobile/v1/devices').json['devices'], [])
 
 
 if __name__ == '__main__':

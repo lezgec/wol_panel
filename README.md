@@ -1,15 +1,18 @@
 # WoL Pro
 
-Aplicación web para registrar equipos y encenderlos mediante Wake-on-LAN, con soporte para Alexa.
+Panel y backend de WoL Pro: cuentas, encendido con Alexa y control remoto mediante el agente Windows, desde la web o la app.
 
 ## Funciones
 
 - Cuentas de usuario y gestión de equipos por nombre y dirección MAC.
 - Encendido con Alexa mediante un Echo compatible en la red del equipo.
-- Encendido desde el navegador mediante un router preparado para Wake-on-WAN.
-- Encendido local cuando el servidor está en la misma red que el equipo.
+- Apagado integrado con cuenta atrás cancelable, y aplicaciones/comandos autorizados mediante el agente.
+- Mi plan: Free con un equipo activo; Premium con diez y aplicaciones/comandos, sin publicidad.
+- Suscripciones verificadas, publicidad con límites y administrador en un repositorio independiente.
 
-El equipo debe tener Wake-on-LAN habilitado. La aplicación no configura el router y enviar una orden no confirma que el equipo haya arrancado.
+El equipo debe tener Wake-on-LAN habilitado y un Echo compatible para encender con Alexa. El encendido por router/Wake-on-WAN se retiró. Las órdenes al agente siguen usando HTTPS por Internet, sin abrir puertos entrantes en casa; requieren el PC encendido, sesión Windows y permisos locales.
+
+Consulta [MONETIZATION_DEPLOYMENT.md](MONETIZATION_DEPLOYMENT.md) para la actualización manual, respaldo y configuración de compras/anuncios. Los proveedores están desactivados inicialmente. El [administrador](https://github.com/lezgec/wolpro_admin) usa acceso independiente con contraseña, TOTP y auditoría.
 
 ## Ejecutar
 
@@ -32,9 +35,9 @@ La app [wol-pro-app](https://github.com/lezgec/wol-pro-app) reutiliza el acceso 
 - `POST /api/mobile/v1/devices`: crea un dispositivo con Alexa, nombre y MAC.
 - `PUT /api/mobile/v1/devices/{id}`: edita nombre y MAC, conservando el método y la configuración existentes.
 - `POST /api/mobile/v1/logout`: cierra la sesión.
-- `POST /api/mobile/v1/devices/{id}/wake`: comprueba propiedad y devuelve instrucciones Alexa o «Próximamente» para encendido directo.
+- `POST /api/mobile/v1/devices/{id}/wake`: comprueba propiedad y equipo activo; devuelve instrucciones Alexa o rechaza el método retirado.
 
-Todas las escrituras requieren sesión y cabecera `X-CSRF-Token`; creación y edición tienen límites de solicitudes. Las respuestas no se almacenan en caché. El encendido directo está deshabilitado en el cliente móvil; Alexa devuelve instrucciones. No se requieren cambios de tablas ni credenciales nuevas.
+Todas las escrituras requieren sesión y cabecera `X-CSRF-Token`; creación y edición tienen límites de solicitudes y cuota de plan. Las respuestas no se almacenan en caché. El control de PC y Mi plan usan la misma sesión; el servidor aplica los permisos a todos los canales. Se añaden tablas privadas idempotentes para planes y administración al estado existente.
 
 ## Pruebas
 

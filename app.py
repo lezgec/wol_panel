@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash, send_from_directory
 import database
 import logging
 import socket
@@ -116,6 +116,17 @@ app.jinja_env.globals['csrf_token'] = csrf_token
 
 @app.before_request
 def protect_forms():
+    if request.endpoint == 'authorized_ad_sellers':
+        return  # Public publisher declarations must be crawlable without a session.
+    if request.path.startswith(('/api/admin/v1/', '/api/billing/', '/api/ads/ssv')):
+        return  # These endpoints verify their own administrator CSRF or provider signature.
+    if 'user_id' in session:
+        plan = plans.snapshot(session['user_id'])
+        if plan['suspended'] or session.get('plan_epoch', 0) != plan['session_epoch']:
+            session.clear()
+            if request.path.startswith('/api/'):
+                return jsonify(error='authentication_required', message='Inicia sesión nuevamente.'), 401
+            return redirect(url_for('login'))
     # Remembered mobile cookies also require a live server-side session record.
     identifier = session.get('mobile_session_id')
     if identifier is not None:
@@ -157,7 +168,7 @@ def response_security(response):
     response.headers['X-Frame-Options'] = 'DENY'
     if app.config['SESSION_COOKIE_SECURE']:
         response.headers['Strict-Transport-Security'] = 'max-age=31536000'
-    if request.endpoint not in ('privacy_policy', 'terms_of_use', 'static'):
+    if request.endpoint not in ('privacy_policy', 'terms_of_use', 'static', 'authorized_ad_sellers'):
         response.headers['Cache-Control'] = 'no-store'
     return response
 
@@ -304,7 +315,9 @@ def send_wol(mac_address, host=None, port=None):
     return False
 
 def wake_settings(form):
-    method = form.get('wake_method', 'local')
+    method = form.get('wake_method', 'alexa')
+    if method == 'router':
+        raise ValueError('El encendido por router se ha retirado. Selecciona Alexa.')
     if method == 'local' and not app.config['ALLOW_LOCAL_WOL']:
         raise ValueError('Selecciona Alexa o Router por Internet para el servidor público.')
     if method not in ('local', 'router', 'alexa'):
@@ -354,7 +367,8 @@ def render_dashboard(**context):
     controls = agent_service.dashboard_data(user_id) if app.config['ENABLE_WINDOWS_AGENT'] else {}
     return render_template('dashboard.html', devices=devices, email=session.get('email'),
                            alexa_ready=alexa_gateway.is_linked(str(user_id)),
-                           allow_local=app.config['ALLOW_LOCAL_WOL'], controls=controls, **context)
+                           allow_local=app.config['ALLOW_LOCAL_WOL'], controls=controls, plan=plans.public(user_id),
+                           web_ads=dict(client=os.environ.get('ADSENSE_CLIENT',''),banner=os.environ.get('ADSENSE_BANNER_SLOT',''),rectangle=os.environ.get('ADSENSE_RECTANGLE_SLOT','')), **context)
 
 @app.route('/')
 def index():
@@ -377,10 +391,13 @@ def login():
         
         if user and check_password_hash(user[2], password):
             # Permite el acceso si está verificado o si el valor es nulo/1
-            if user[3] is not None and int(user[3]) == 0:
+            if plans.snapshot(user[0])['suspended']:
+                error = 'Esta cuenta está suspendida. Contacta con soporte.'
+            elif user[3] is not None and int(user[3]) == 0:
                 error = 'Debes verificar tu correo electrónico antes de iniciar sesión.'
             else:
                 session['user_id'] = user[0]
+                session['plan_epoch'] = plans.snapshot(user[0])['session_epoch']
                 session['email'] = user[1]
                 log_action(user[0], "LOGIN_LOCAL", f"Inicio de sesión exitoso para {email}")
                 return redirect(url_for('index'))
@@ -448,6 +465,7 @@ def callback_amazon():
                                (amazon_email, 'AUTH_AMAZON_SECURE', amazon_unique_id))
                 user = (cursor.lastrowid, amazon_email)
         session['user_id'], session['email'] = user
+        session['plan_epoch'] = plans.snapshot(user[0])['session_epoch']
         log_action(session['user_id'], "LOGIN_AMAZON", "Inicio de sesión vía Amazon exitoso")
         
     except Exception:
@@ -571,9 +589,22 @@ def reset_password():
 
     return render_template('reset_password.html', error=error)
 
+@app.get('/ads.txt')
+@app.get('/app-ads.txt')
+def authorized_ad_sellers():
+    filename = 'app-ads.txt' if request.path == '/app-ads.txt' else 'ads.txt'
+    return send_from_directory(app.root_path, filename, mimetype='text/plain', max_age=3600)
+
+
 @app.route('/privacy')
 def privacy_policy():
     return render_template('privacy.html')
+
+@app.get('/account-deletion')
+def account_deletion():
+    # Public request instructions also work after uninstalling the mobile app.
+    # This page never deletes an account or sends a request automatically.
+    return render_template('account_deletion.html')
 
 @app.route('/terms')
 def terms_of_use():
@@ -608,8 +639,7 @@ def add_device():
         return redirect(url_for('index'))
     user_sub = str(session['user_id'])
     
-    database.execute('INSERT INTO devices (name, mac, user_sub, wake_method, wake_host, wake_port) VALUES (%s, %s, %s, %s, %s, %s)',
-                     (name, mac, user_sub, method, host, port))
+    plans.create_device(session['user_id'], name, mac, method, host, port)
     
     log_action(session['user_id'], "ADD_DEVICE", f"Dispositivo añadido: {name} ({mac})")
     return redirect(url_for('index'))
@@ -621,10 +651,13 @@ def wake_result(device_id, user_id):
     if not row:
         return dict(error='device_not_found', message='Equipo no encontrado.', category='danger'), 404
     dev_name, dev_mac, method, host, port = row
+    plans.require(user_id, device_id)
+    if method == 'router':
+        return dict(error='router_retired', message='El encendido por router se ha retirado. Configura este equipo con Alexa.', category='warning'), 409
     if method == 'alexa':
-        return dict(error='alexa_required', message=f'Enciende {dev_name} desde la app Alexa o diciendo «Alexa, enciende {dev_name}». Para encender aquí, selecciona Router por Internet.', category='info'), 409
+        return dict(error='alexa_required', message=f'Enciende {dev_name} desde la app Alexa o diciendo «Alexa, enciende {dev_name}».', category='info'), 409
     if method == 'local' and not app.config['ALLOW_LOCAL_WOL']:
-        return dict(error='local_unavailable', message='Cambia este equipo a Alexa o Router por Internet. La red local del servidor no alcanza tu casa.', category='warning'), 409
+        return dict(error='local_unavailable', message='Configura este equipo con Alexa. La red local del servidor no alcanza tu casa.', category='warning'), 409
     if method not in ('router', 'local'):
         return dict(error='invalid_method', message='Revisa el método de encendido del equipo.', category='danger'), 409
     sent = send_router_wol(dev_mac, host, port) if method == 'router' else send_wol(dev_mac)
@@ -642,9 +675,11 @@ def mobile_devices():
     devices = [dict(id=row[0], name=row[1], mac=row[2], wake_method=row[3],
                     can_wake=False) for row in rows]
     states = agent_service.connection_states(session['user_id']) if app.config['ENABLE_WINDOWS_AGENT'] else {}
+    active = plans.active_devices(session['user_id'])
     for device in devices:
+        device['plan_active'] = device['id'] in active
         device['agent_state'] = states.get(device['id'], {}).get('state', 'unlinked')
-    return jsonify(version=1, devices=devices, email=session.get('email'), remembered=bool(session.get('mobile_session_id')),
+    return jsonify(version=1, devices=devices, plan=plans.public(session['user_id']), email=session.get('email'), remembered=bool(session.get('mobile_session_id')),
                    alexa_ready=alexa_gateway.is_linked(str(session['user_id'])), csrf_token=csrf_token())
 
 
@@ -666,8 +701,7 @@ def mobile_create_device():
         name, mac = mobile_device_fields()
     except ValueError as error:
         return jsonify(error='invalid_device', message=str(error)), 400
-    database.execute('INSERT INTO devices (name, mac, user_sub, wake_method, wake_host, wake_port) VALUES (%s, %s, %s, %s, %s, %s)',
-                     (name, mac, str(session['user_id']), 'alexa', '', 9))
+    plans.create_device(session['user_id'], name, mac)
     log_action(session['user_id'], 'ADD_DEVICE', f'Dispositivo añadido desde app: {name} ({mac})')
     return mobile_devices(), 201
 
@@ -917,6 +951,8 @@ def alexa_smarthome():
     if not token:
         return alexa_error(directive, 'INVALID_AUTHORIZATION_CREDENTIAL', 'Token inválido o expirado. Vincula tu cuenta de nuevo.')
     user_id = token['user_id']
+    if plans.snapshot(user_id)['suspended']:
+        return alexa_error(directive, 'INVALID_AUTHORIZATION_CREDENTIAL', 'Esta cuenta está suspendida.')
     if namespace == 'Alexa.Authorization' and name == 'AcceptGrant':
         grant = payload.get('grant', {})
         if not isinstance(grant, dict) or grant.get('type') != 'OAuth2.AuthorizationCode' or not isinstance(grant.get('code'), str) or not grant['code']:
@@ -949,7 +985,10 @@ def alexa_smarthome():
     if namespace == 'Alexa.Discovery' and name == 'Discover':
         devices = database.fetch_all('SELECT id, name, mac, wake_method FROM devices WHERE user_sub = %s', (user_id,))
         endpoints = []
+        active = plans.active_devices(user_id)
         for dev_id, dev_name, dev_mac, method in devices:
+            if dev_id not in active or method == 'router':
+                continue
             if method == 'local' and not app.config['ALLOW_LOCAL_WOL']:
                 continue
             endpoints.append({'endpointId': str(dev_id), 'manufacturerName': 'WoL Pro', 'friendlyName': dev_name,
@@ -969,6 +1008,12 @@ def alexa_smarthome():
         return jsonify(event={'header': {'namespace': 'Alexa.Discovery', 'name': 'Discover.Response', 'payloadVersion': '3', 'messageId': str(uuid.uuid4())},
                               'payload': {'endpoints': endpoints}})
     if namespace == 'Alexa.PowerController' and name in ('TurnOn', 'TurnOff'):
+        try:
+            plans.require(user_id, int(endpoint.get('endpointId', '0')))
+        except AgentError as error:
+            return alexa_error(directive, 'NO_SUCH_ENDPOINT' if error.code == 'not_found' else 'ENDPOINT_UNREACHABLE', error.message)
+        except ValueError:
+            return alexa_error(directive, 'NO_SUCH_ENDPOINT', 'Equipo no encontrado.')
         endpoint_id = endpoint.get('endpointId')
         if not isinstance(endpoint_id, str) or not endpoint_id.isascii() or not endpoint_id.isdigit() or len(endpoint_id) > 10 or int(endpoint_id) > 2147483647:
             return alexa_error(directive, 'NO_SUCH_ENDPOINT', 'Identificador de equipo inválido.')
@@ -990,7 +1035,9 @@ def alexa_smarthome():
             return jsonify(event={'header': {'namespace': 'Alexa', 'name': 'DeferredResponse', 'payloadVersion': '3',
                                              'messageId': str(uuid.uuid4()), 'correlationToken': header['correlationToken']},
                                   'payload': {'estimatedDeferralInSeconds': 5}})
-        sent = send_router_wol(device[1], device[3], device[4]) if device[2] == 'router' else send_wol(device[1])
+        if device[2] == 'router':
+            return alexa_error(directive, 'ENDPOINT_UNREACHABLE', 'Configura este equipo con Alexa desde el panel.')
+        sent = send_wol(device[1])
         if not sent:
             return alexa_error(directive, 'ENDPOINT_UNREACHABLE', 'No se pudo enviar el paquete de encendido.')
         log_action(user_id, 'ALEXA_WOL', f'Paquete de encendido enviado a {device[0]}')
@@ -1002,8 +1049,28 @@ def alexa_smarthome():
                               'endpoint': {'endpointId': str(endpoint['endpointId'])}, 'payload': {}})
     return alexa_error(directive, 'INVALID_DIRECTIVE', 'Directiva no compatible.')
 
-from windows_agent import install as install_windows_agent
+from windows_agent import AgentError, install as install_windows_agent
+from monetization import Plans, install as install_plans
+plans = Plans(database, state_connection)
+install_plans(app, plans, rate_allowed)
+from admin_api import install as install_admin_api
+install_admin_api(app, plans, rate_allowed)
+from billing import PlayBilling, install as install_billing
+billing = PlayBilling(plans, os.environ.get('BILLING_ACCOUNT_SECRET') or app.secret_key)
+plans.billing = billing
+install_billing(app, billing, rate_allowed)
+from ads_verification import install as install_ads_verification
+admob_verifier = install_ads_verification(app, plans)
+
+@app.errorhandler(AgentError)
+def plan_error(error):
+    if request.path.startswith('/api/'):
+        return jsonify(error=error.code, message=error.message), error.status
+    flash(error.message, 'warning')
+    return redirect(url_for('index'))
+
 agent_service = install_windows_agent(app, database, state_connection, rate_allowed, log_action, render_dashboard)
+agent_service.plans = plans
 from mobile_control import install as install_mobile_control
 install_mobile_control(app, agent_service, database, rate_allowed, log_action)
 

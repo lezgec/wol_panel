@@ -56,3 +56,9 @@ summary:focus-visible,a:focus-visible,button:focus-visible { outline:2px solid v
 @media (max-width:767px) { .panel-shell { padding-top:26px; } .workspace-intro { padding-top:0; } h1 br { display:none; } .usage-note { display:none; } }
 @media (max-width:575px) { .topbar { padding:14px 18px; } .device-summary { padding:16px; gap:10px; flex-wrap:wrap; } .device-identity { flex:1 1 calc(100% - 90px); } .device-summary>.status-badge { order:4; margin-left:52px; } .device-content { padding:18px; } .panel-dialog { padding:20px; } }
 @media (prefers-reduced-motion:reduce) { .expand-icon { transition:none; } }
+
+.web-ad-space { margin: 24px 0; padding: 14px; border: 1px solid var(--panel-border); border-radius: 12px; background:var(--panel-surface); overflow:hidden; }
+.web-ad-space[hidden], .privacy-options[hidden] { display:none !important; }
+.web-ad-label { display:block; font-size:10px; letter-spacing:.06em; color:#91a5bc; margin-bottom:8px; }
+.web-ad-space ins[data-ad-status="unfilled"] { display:none !important; }
+.privacy-options { border:0; background:none; color:#91a5bc; font:inherit; text-decoration:underline; padding:4px 8px; }

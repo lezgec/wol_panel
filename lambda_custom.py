@@ -26,7 +26,7 @@ def lambda_handler(event, context):
     body = json.dumps(event).encode()
     stamp = str(int(time.time()))
     signature = hmac.new(secret.encode(), stamp.encode()+b'.'+body, hashlib.sha256).hexdigest()
-    req = urllib.request.Request(url, data=body, headers={'Content-Type':'application/json','X-Wol-Timestamp':stamp,'X-Wol-Signature':signature}, method='POST')
+    req = urllib.request.Request(url, data=body, headers={'Content-Type':'application/json','User-Agent':'WoLPro-Alexa-Bridge/1.0','X-Wol-Timestamp':stamp,'X-Wol-Signature':signature}, method='POST')
     try:
         with urllib.request.build_opener(NoRedirect).open(req, timeout=6) as response:
             return json.load(response)

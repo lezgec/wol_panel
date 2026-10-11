@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Solicitar eliminación de cuenta - WoL Pro</title>
+    {% include "_icons.html" %}
+    <style>
+        body { margin: 0; padding: 24px; background: #0b1220; color: #cbd5e1; font-family: Arial, sans-serif; line-height: 1.65; }
+        main { max-width: 760px; margin: 24px auto; padding: 28px; background: #162033; border: 1px solid #263449; border-radius: 20px; }
+        h1, h2 { color: #f8fafc; line-height: 1.3; }
+        h1 { font-size: 28px; } h2 { font-size: 20px; margin-top: 32px; }
+        a { color: #67e8f9; overflow-wrap: anywhere; }
+        .request { display: inline-block; padding: 14px 20px; background: #22d3ee; color: #082f49; border-radius: 12px; font-weight: bold; text-decoration: none; }
+        .note { padding: 16px; border-left: 3px solid #22d3ee; background: #102d3e; }
+        @media (max-width: 480px) { body { padding: 12px; } main { margin: 12px auto; padding: 20px; } }
+    </style>
+</head>
+<body>
+<main>
+    <p>WoL Pro · Cuenta y privacidad</p>
+    <h1>Solicitar eliminación de tu cuenta</h1>
+    <p>Puedes solicitar que eliminemos tu cuenta de WoL Pro y sus datos asociados. No necesitas tener la app instalada ni iniciar sesión para enviar la solicitud.</p>
+    <h2>Cómo solicitarla</h2>
+    <ol>
+        <li>Escribe desde el correo registrado en tu cuenta a <a href="mailto:dev@luiszamora.dev">dev@luiszamora.dev</a>.</li>
+        <li>Usa el asunto <strong>Eliminar mi cuenta de WoL Pro</strong> e indica que deseas eliminar la cuenta y sus datos asociados.</li>
+        <li>Soporte verificará que la solicitud corresponde al titular y te confirmará el resultado por correo. Si ya no puedes acceder al correo registrado, indícalo para recibir instrucciones de verificación.</li>
+    </ol>
+    <p><a class="request" href="mailto:dev@luiszamora.dev?subject=Eliminar%20mi%20cuenta%20de%20WoL%20Pro&amp;body=Solicito%20la%20eliminaci%C3%B3n%20de%20mi%20cuenta%20de%20WoL%20Pro%20y%20sus%20datos%20asociados.">Preparar solicitud por correo</a></p>
+    <p class="note">El botón abre tu aplicación de correo. Revisa y envía el mensaje para solicitar la eliminación. No envíes contraseñas, códigos de verificación ni credenciales del agente.</p>
+    {% if session.get('user_id') %}
+    <h2>Solicitar desde tu cuenta</h2>
+    <form method="post" action="{{ url_for('plans.deletion_request') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label><input type="checkbox" name="confirmed" value="yes" required> Deseo solicitar la eliminación de mi cuenta y sus datos. Entiendo que la suscripción de Google Play se cancela por separado.</label>
+      <p><button class="request" type="submit">Registrar solicitud de eliminación</button></p>
+    </form>
+    {% endif %}
+    <h2>Qué datos se eliminan</h2>
+    <p>La cuenta y sus credenciales, los equipos registrados, las vinculaciones y permisos de Alexa y del agente Windows, el catálogo de aplicaciones autorizadas, las acciones y el historial asociado. También se revoca el acceso recordado en los teléfonos.</p>
+    <p>Si alguna información debe conservarse para atender una obligación legal o un incidente de seguridad, soporte te informará del motivo y del plazo de conservación aplicable.</p>
+    <h2>Qué ocurre con tus equipos</h2>
+    <p>Eliminar la cuenta impide controlar tus equipos mediante WoL Pro. No desinstala el agente de Windows ni elimina aplicaciones, archivos o comandos guardados en el PC; puedes quitarlos desde Windows.</p>
+    <p><a href="{{ url_for('privacy_policy') }}">Política de privacidad</a> · <a href="{{ url_for('login') }}">Volver a WoL Pro</a></p>
+</main>
+</body>
+</html>

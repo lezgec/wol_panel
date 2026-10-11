@@ -12,26 +12,7 @@ document.querySelectorAll('[data-close-dialog]').forEach(button => {
 });
 document.querySelectorAll('[data-auto-open]').forEach(openDialog);
 
-document.querySelectorAll('[data-wake-form]').forEach(form => {
-    const select = form.querySelector('[name="wake_method"]');
-    const fields = form.querySelector('[data-router-fields]');
-    const note = form.querySelector('[data-method-note]');
-    function update() {
-        const router = select.value === 'router';
-        fields.hidden = !router;
-        fields.querySelectorAll('input').forEach(input => {
-            input.disabled = !router;
-            input.required = router;
-        });
-        note.textContent = select.value === 'alexa'
-            ? 'Encendido desde la app Alexa o por voz usando el Echo de casa.'
-            : select.value === 'local'
-            ? 'Solo funciona cuando el servidor de esta web está en la red de la PC.'
-            : 'Encendido desde esta web usando el destino y el puerto de tu router.';
-    }
-    select.addEventListener('change', update);
-    update();
-});
+document.querySelectorAll('[data-method-note]').forEach(note => { note.textContent = 'Encendido desde la app Alexa o por voz usando un Echo compatible en la red de casa.'; });
 
 document.querySelectorAll('[data-action-form]').forEach(form => {
     const kind = form.querySelector('[name="kind"]');
@@ -112,7 +93,7 @@ if (document.querySelector('[data-pc-status]')) {
                 badge.classList.toggle('is-online', connected);
                 badge.textContent = ready ? 'PC conectado · control disponible' : connected ? 'PC conectado · agente de sesión sin conexión' : pc?.active ? 'Sin conexión' : 'Sin vincular';
                 document.querySelectorAll('[data-pc-run]').forEach(button => {
-                    if (button.dataset.pcRun === badge.dataset.pcStatus) button.disabled = !ready;
+                    if (button.dataset.pcRun === badge.dataset.pcStatus) button.disabled = !ready || pc?.plan_active === false || (button.dataset.premiumAction === 'true' && !pc?.can_launch);
                 });
                 const notice = document.querySelector('[data-pc-notice="' + badge.dataset.pcStatus + '"]');
                 if (notice) {

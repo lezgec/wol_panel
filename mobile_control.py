@@ -115,6 +115,8 @@ def install(app, service, database, rate_allowed, audit):
         pc, data = linked(device_id), body()
         name, kind = text(data.get('name')), data.get('kind')
         key = data.get('app_key') if kind == 'launch' else None
+        if service.plans:
+            service.plans.require(session['user_id'], device_id, kind)
         if kind == 'launch':
             key = text(key)
             if not service.first('SELECT app_key FROM agent_apps WHERE agent_id=%s AND app_key=%s', (pc['id'], key)):
