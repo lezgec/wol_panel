@@ -1,6 +1,6 @@
 # Actualizar WoL Pro desde Git
 
-La entrega completa está en `codex/monetization` de los cuatro repositorios: `wol_panel`, `wol-pro-app`, `wolpro_agent` y `wolpro_admin`. Publicar código no actualiza automáticamente Azure, la app instalada ni el instalador descargable.
+La entrega completa está en `main` de `wol_panel`, `wol-pro-app` y `wolpro_agent`. El administrador `wolpro_admin` utiliza `codex/monetization` como rama principal. La rama `codex/monetization` de los cuatro también conserva la entrega. Publicar código no actualiza automáticamente Azure, la app instalada ni el instalador descargable.
 
 ## Backend en Azure
 
@@ -23,8 +23,8 @@ git rev-parse HEAD | sudo tee "$wol_backup/commit.txt"
 sudo tar -czf "$wol_backup/codigo.tar.gz" --exclude=.git --exclude=.venv --exclude=venv --exclude=__pycache__ --exclude=instance .
 echo "RESPALDO=$wol_backup"
 git fetch origin
-git switch codex/monetization
-git pull --ff-only origin codex/monetization
+git switch main
+git pull --ff-only origin main
 sudo systemctl restart wol.service
 sudo systemctl is-active wol.service
 curl -fsS https://wol.luiszamora.dev/api/mobile/v1/auth/session | python3 -c 'import json,sys; print("Acceso:", json.load(sys.stdin)["phase"])'
@@ -37,11 +37,11 @@ Si falla: `sudo journalctl -u wol.service -n 60 --no-pager`. Para volver al comm
 
 ## App móvil y agente Windows
 
-En PowerShell, dentro de cada repositorio local, ejecuta `git fetch origin`, `git switch codex/monetization` y `git pull --ff-only origin codex/monetization`. Después:
+En PowerShell, dentro de los repositorios locales de backend, app y agente, ejecuta `git fetch origin`, `git switch main` y `git pull --ff-only origin main`. Para `wolpro_admin`, utiliza `codex/monetization` en lugar de `main`. Después:
 
 - App: desde `C:\Users\lezgo\Desktop\wol-pro-app`, ejecuta `npm ci`, `npm run typecheck`, `npm run lint` y `npm test`. Compila Android con `:app:assembleRelease` desde Android Studio o `android\gradlew.bat`. Instala el nuevo `android\app\build\outputs\apk\release\app-release.apk`. La firma debe coincidir con la instalación actual. Para Google Play usa tu clave de publicación, AAB y nuevo código de versión. Consulta `wol-pro-app/README.md`.
 - Agente: abre `C:\Users\lezgo\Desktop\wolpro_agent\wolpro_agent.sln` en Visual Studio 2022. Consulta su README para generar el instalador. El código actualizado no reemplaza automáticamente el `.exe` disponible en Azure; hay que subirlo después de generar una nueva compilación. `dotnet test wolpro_agent.sln -c Release` y `scripts/Verify-UI.ps1` verifican el código sin ejecutar órdenes reales.
 
 ## Administrador
 
-Si `/opt/wolpro_admin` es un checkout Git limpio, ejecuta allí los mismos comandos de `fetch`, `switch` y `pull`. Si es una carpeta estática, descarga el repositorio privado en una carpeta distinta y copia el `app.js` actualizado a `/opt/wolpro_admin/app.js`, respaldando antes el existente. Abre de nuevo la página para cargar el JavaScript nuevo. Los cambios de esta entrega son de interfaz y documentación.
+Si `/opt/wolpro_admin` es un checkout Git limpio, ejecuta allí `git fetch origin`, `git switch codex/monetization` y `git pull --ff-only origin codex/monetization`. Si es una carpeta estática, descarga el repositorio privado en una carpeta distinta y copia el `app.js` actualizado a `/opt/wolpro_admin/app.js`, respaldando antes el existente. Abre de nuevo la página para cargar el JavaScript nuevo. Los cambios de esta entrega son de interfaz y documentación.

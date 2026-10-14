@@ -1,5 +1,7 @@
 # WoL Pro 1.1 — actualización manual
 
+Sincronización del 13 de octubre de 2026: backend, app móvil y agente están actualizados en `main`; el administrador utiliza `codex/monetization` como rama principal. [ACTUALIZAR_ACCESO_NATIVO.md](ACTUALIZAR_ACCESO_NATIVO.md) contiene la actualización actual desde Git. Los pasos originales siguientes conservan el historial de la entrega; consulta `PENDIENTES_PUBLICACION.md` antes de repetir configuración ya instalada.
+
 Código preparado para Free/Premium. Esta entrega **no actualiza Azure, Amazon ni Google Play**, no crea productos de pago y no activa anuncios reales. La primera actualización del backend aplica Free (un equipo, Alexa y apagado) a cuentas sin una compra verificada o cortesía vigente.
 
 ## Repositorios y orden
