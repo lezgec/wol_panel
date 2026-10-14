@@ -1,0 +1,11 @@
+[Unit]
+Description=WoL Pro - comprobar suscripciones cada 15 minutos
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=15min
+RandomizedDelaySec=30s
+Unit=wol-billing-reconcile.service
+
+[Install]
+WantedBy=timers.target

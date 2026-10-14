@@ -38,6 +38,10 @@ Suspender impide operar e invalida sesiones/Alexa; revocar accesos además desvi
 
 ## Google Play: configurar al final
 
+La configuración real del catálogo mundial, el proyecto Cloud y el procedimiento
+manual de Azure están en [GOOGLE_PLAY_SETUP.md](GOOGLE_PLAY_SETUP.md). Consultar
+allí el estado actual; los pasos siguientes describen el diseño de la entrega.
+
 1. Crea una suscripción `wolpro_premium` con dos planes base de renovación automática: mensual USD 2,99 y anual USD 24,99. Configura impuestos y precios locales en Play Console.
 2. En el plan anual crea una oferta con **un período anual a USD 19,99**, seguido del plan anual normal a USD 24,99. Usa la etiqueta `intro-year` y elegibilidad de nuevos suscriptores. La app muestra fases y precios reales que devuelve Google. Mi plan y el administrador distinguen precios de referencia de precios reales de tienda. Las fechas administrativas controlan la visibilidad en WoL Pro; configura también la duración/elegibilidad en Play Console.
 3. Concede a una cuenta de servicio el permiso mínimo de consulta/gestión de suscripciones de esta app en Play Console. Guarda su JSON fuera del código, con acceso exclusivo del servicio.

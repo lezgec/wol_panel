@@ -21,6 +21,7 @@ from email.utils import parseaddr
 from datetime import datetime, timezone, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
+from native_auth import PUBLIC_ENDPOINTS as NATIVE_AUTH_PUBLIC, RATE_BUCKETS as NATIVE_AUTH_BUCKETS
 
 load_dotenv(Path(__file__).parent / '.env')
 
@@ -85,7 +86,9 @@ def rate_allowed(bucket, identity, limit, seconds):
 REQUEST_LIMITS = {'login': (15, 60), 'oauth_authorize': (15, 60), 'oauth_token': (120, 60),
                   'register': (5, 900), 'forgot_password': (5, 900), 'wake_device': (12, 60),
                   'add_device': (30, 60), 'update_device_settings': (30, 60), 'edit_device': (30, 60), 'mobile_wake': (12, 60),
-                  'mobile_create_device': (30, 60), 'mobile_update_device': (30, 60), 'mobile_remember_session': (30, 60)}
+                  'mobile_create_device': (30, 60), 'mobile_update_device': (30, 60), 'mobile_remember_session': (30, 60),
+                  'mobile_auth.login': (15, 60), 'mobile_auth.register': (5, 900), 'mobile_auth.forgot': (5, 900),
+                  'mobile_auth.resend': (5, 900), 'mobile_auth.verify': (15, 60), 'mobile_auth.reset': (15, 60)}
 
 def create_challenge(email, purpose, code):
     challenge_id = secrets.token_urlsafe(32)
@@ -124,9 +127,12 @@ def protect_forms():
         plan = plans.snapshot(session['user_id'])
         if plan['suspended'] or session.get('plan_epoch', 0) != plan['session_epoch']:
             session.clear()
-            if request.path.startswith('/api/'):
+            if request.endpoint in ('mobile_auth.bridge', 'mobile_auth.bootstrap'):
+                pass
+            elif request.path.startswith('/api/'):
                 return jsonify(error='authentication_required', message='Inicia sesión nuevamente.'), 401
-            return redirect(url_for('login'))
+            else:
+                return redirect(url_for('login'))
     # Remembered mobile cookies also require a live server-side session record.
     identifier = session.get('mobile_session_id')
     if identifier is not None:
@@ -136,26 +142,29 @@ def protect_forms():
                 row = db.execute('SELECT user_id,expires FROM mobile_sessions WHERE id_hash=?', (hashlib.sha256(identifier.encode()).hexdigest(),)).fetchone()
         if not row or row['user_id'] != str(session.get('user_id')) or row['expires'] <= time.time():
             session.clear()
-            if request.path.startswith('/api/mobile/v1/'):
+            if request.endpoint in ('mobile_auth.bridge', 'mobile_auth.bootstrap'):
+                pass
+            elif request.path.startswith('/api/mobile/v1/'):
                 return jsonify(error='authentication_required', message='Tu sesión caducó. Inicia sesión nuevamente.'), 401
-            return redirect(url_for('login'))
+            else:
+                return redirect(url_for('login'))
     # Estas rutas verifican Bearer o firma del puente; no usan la sesión web.
     if request.endpoint and request.endpoint.startswith('windows.') and (request.path.startswith('/api/agent/v1/') or request.endpoint == 'windows.alexa_custom'):
         return
-    if request.path.startswith('/api/mobile/v1/') and 'user_id' not in session:
+    if request.path.startswith('/api/mobile/v1/') and 'user_id' not in session and request.endpoint not in NATIVE_AUTH_PUBLIC:
         return jsonify(error='authentication_required', message='Inicia sesión para continuar.'), 401
     if (request.method == 'POST' or (request.path.startswith('/api/mobile/v1/') and request.method in ('PUT', 'DELETE'))) and request.endpoint not in ('oauth_token', 'alexa_smarthome'):
         expected = session.get('csrf_token')
         supplied = request.headers.get('X-CSRF-Token', '') if request.path.startswith('/api/mobile/v1/') else request.form.get('csrf_token', '')
         if not expected or not secrets.compare_digest(expected.encode('utf-8'), supplied.encode('utf-8')):
             if request.path.startswith('/api/mobile/v1/'):
-                return jsonify(error='csrf_expired', message='La sesión del formulario expiró. Actualiza tus equipos.'), 400
+                return jsonify(error='csrf_expired', message='La sesión del formulario expiró. Vuelve a intentarlo.' if request.endpoint in NATIVE_AUTH_PUBLIC else 'La sesión del formulario expiró. Actualiza tus equipos.'), 400
             return 'El formulario expiró. Recarga la página e inténtalo de nuevo.', 400
     if request.method in ('POST', 'PUT', 'DELETE'):
         rule = REQUEST_LIMITS.get(request.endpoint)
         if request.endpoint == 'verify_account' and request.form.get('action') == 'resend':
             rule = (5, 900)
-        bucket = 'wake_device' if request.endpoint == 'mobile_wake' else request.endpoint
+        bucket = 'wake_device' if request.endpoint == 'mobile_wake' else NATIVE_AUTH_BUCKETS.get(request.endpoint, request.endpoint)
         if rule and not rate_allowed(bucket, str(session.get('user_id') or request.remote_addr), *rule):
             if request.path.startswith('/api/mobile/v1/'):
                 return jsonify(error='rate_limited', message='Demasiadas solicitudes. Espera antes de intentarlo de nuevo.'), 429, {'Retry-After': str(rule[1])}
@@ -733,15 +742,19 @@ def mobile_remember_session():
     data = request.get_json(silent=True)
     if not isinstance(data, dict) or type(data.get('enabled')) is not bool:
         return jsonify(error='invalid_input', message='Selecciona si deseas conservar la sesión.'), 400
+    set_mobile_session(data['enabled'])
+    return mobile_devices()
+
+
+def set_mobile_session(enabled):
     revoke_mobile_session()
-    if data['enabled']:
+    if enabled:
         identifier = secrets.token_urlsafe(32)
         with state_connection() as db:
             db.execute('DELETE FROM mobile_sessions WHERE expires<=?', (time.time(),))
             db.execute('INSERT INTO mobile_sessions VALUES (?,?,?)', (hashlib.sha256(identifier.encode()).hexdigest(), str(session['user_id']), time.time()+30*86400))
         session['mobile_session_id'] = identifier
         session.permanent = True
-    return mobile_devices()
 
 
 @app.route('/api/mobile/v1/devices/<int:device_id>', methods=['DELETE'])
@@ -1073,6 +1086,9 @@ agent_service = install_windows_agent(app, database, state_connection, rate_allo
 agent_service.plans = plans
 from mobile_control import install as install_mobile_control
 install_mobile_control(app, agent_service, database, rate_allowed, log_action)
+import sys
+from native_auth import install as install_native_auth
+install_native_auth(app, sys.modules[__name__])
 
 if __name__ == '__main__':
     from waitress import serve

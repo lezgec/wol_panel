@@ -1,0 +1,14 @@
+[Unit]
+Description=WoL Pro - reconciliacion de suscripciones Google Play
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=wol
+WorkingDirectory=/srv/apps/wakeonlan
+EnvironmentFile=/srv/apps/wakeonlan/.env
+ExecStart=/srv/apps/wakeonlan/.venv/bin/python /srv/apps/wakeonlan/billing_reconcile.py
+UMask=0077
+NoNewPrivileges=true
+TimeoutStartSec=15min

@@ -206,7 +206,10 @@ def install(app, plans, rate_allowed):
     @bp.route('/ads',methods=['GET','POST'])
     def ads():
         actor=identity()
-        if request.method=='GET': return jsonify(ads=plans.ads_config())
+        if request.method=='GET':
+            return jsonify(ads=plans.ads_config(),test_scope=bool(os.environ.get('ADS_TEST_USER_IDS','').strip()),
+                           web_ready=os.environ.get('ADS_WEB_READY')=='1',
+                           web_test_scope=bool(os.environ.get('ADS_WEB_TEST_USER_IDS','').strip()))
         data=body(); why=reason(data); config=data.get('ads')
         if not isinstance(config,dict) or set(config)!=set(DEFAULT_ADS):
             raise AgentError('invalid_input','Configuración publicitaria incompleta.')

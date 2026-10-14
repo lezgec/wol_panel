@@ -148,6 +148,16 @@ class Plans:
         devices = self.devices(user_id)
         active = self.active_devices(user_id, plan=plan)
         config = self.ads_config()
+        web_config = dict(config)
+        # A nonempty test scope limits ads to explicitly selected accounts.
+        # It never turns on the global switch or bypasses Premium/SSV checks.
+        scope = os.environ.get('ADS_TEST_USER_IDS', '').strip()
+        if scope:
+            values = [value.strip() for value in scope.split(',')]
+            valid = all(value.isascii() and value.isdecimal() and int(value) > 0 for value in values)
+            accounts = {str(int(value)) for value in values} if valid else set()
+            config = {**config, 'enabled': bool(config['enabled'] and str(user_id) in accounts),
+                      'web': False, 'reward_minutes': 30}
         with self.state() as db:
             subscription = db.execute('SELECT provider,product,state,expires,auto_renew FROM plan_subscriptions WHERE user_id=? ORDER BY verified DESC LIMIT 1', (str(user_id),)).fetchone()
             used_intro = db.execute("SELECT 1 FROM plan_subscriptions WHERE user_id=? AND expires>0 AND state!='SUBSCRIPTION_STATE_PENDING' LIMIT 1", (str(user_id),)).fetchone()
@@ -155,9 +165,17 @@ class Plans:
         promotion = json.loads(promo_row['value']) if promo_row else dict(enabled=True, starts_at=0, ends_at=0)
         promo_eligible = not used_intro and promotion['enabled'] and promotion['starts_at'] <= time.time() and (not promotion['ends_at'] or promotion['ends_at']>time.time())
         eligible = not plan['suspended'] and plan['tier'] == 'free' and plan['ad_free_until'] <= time.time()
+        web_scope = os.environ.get('ADS_WEB_TEST_USER_IDS', '').strip()
+        web_allowed = True
+        if web_scope:
+            values = [value.strip() for value in web_scope.split(',')]
+            valid = all(value.isascii() and value.isdecimal() and int(value) > 0 for value in values)
+            web_allowed = str(user_id) in {str(int(value)) for value in values} if valid else False
+        web_enabled = bool(eligible and web_config['enabled'] and web_config['web'] and web_allowed
+                           and os.environ.get('ADS_WEB_READY') == '1')
         return {**plan, 'registered_devices': len(devices), 'active_devices': active,
                 'subscription': dict(subscription) if subscription else None,
-                'ads': {**config, 'enabled': bool(config['enabled'] and eligible)},
+                'ads': {**config, 'enabled': bool(config['enabled'] and eligible), 'web': web_enabled},
                 'billing': {'enabled': bool(self.billing and self.billing.enabled), 'provider': 'google_play',
                             'account_id': self.billing.account_id(user_id) if self.billing else None,
                             'products': os.environ.get('GOOGLE_PLAY_PRODUCTS','').split(',') if self.billing and self.billing.enabled else [],

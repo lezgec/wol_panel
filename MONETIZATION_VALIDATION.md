@@ -1,5 +1,7 @@
 # Validación de monetización — 10 de octubre de 2026
 
+Consultar primero [PENDIENTES_PUBLICACION.md](PENDIENTES_PUBLICACION.md) para el estado vigente. El registro siguiente corresponde a fases anteriores y conserva sus resultados históricos; no implica que las versiones 1.1.3 o 0.4.2 estén pendientes de esos mismos pasos. En la preparación web más reciente pasaron 24 pruebas de monetización y 9 de navegador simulado; no se repitieron los CI antiguos ni se probó inventario Google real. El usuario ya desplegó Azure/administrador, probó el agente 0.4.2 y subió Android 1.1.3 a revisión.
+
 ## Comprobaciones locales
 
 - Backend: 154 pruebas de `test_app`, `test_windows_agent` y `test_monetization` pasaron en GitHub. Localmente también pasaron las 17 pruebas finales de monetización y cinco pruebas de acceso/transacciones de base de datos.

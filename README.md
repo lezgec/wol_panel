@@ -29,7 +29,7 @@ Las cuentas y los equipos se guardan en MariaDB. Conserva la carpeta indicada en
 
 ## Cliente móvil
 
-La app [wol-pro-app](https://github.com/lezgec/wol-pro-app) reutiliza el acceso web y muestra equipos en una pantalla nativa. La API versionada usa la sesión Flask existente:
+La app [wol-pro-app](https://github.com/lezgec/wol-pro-app) usa formularios nativos para acceso, registro, verificación y recuperación, y muestra equipos y Control de PC en pantallas nativas. La API versionada usa la sesión Flask existente; [NATIVE_AUTH.md](NATIVE_AUTH.md) documenta el acceso y [ACTUALIZAR_ACCESO_NATIVO.md](ACTUALIZAR_ACCESO_NATIVO.md) la actualización desde Git:
 
 - `GET /api/mobile/v1/devices`: equipos del usuario, correo y token CSRF.
 - `POST /api/mobile/v1/devices`: crea un dispositivo con Alexa, nombre y MAC.

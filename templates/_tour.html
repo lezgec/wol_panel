@@ -1,0 +1,15 @@
+<dialog id="wolpro-tour" class="tour-dialog" aria-labelledby="tour-title" aria-describedby="tour-description"
+        data-tour-account="{{ session.get('user_id', '') }}" data-tour-control="{{ 'true' if windows_agent_enabled else 'false' }}" data-tour-auto="{{ 'false' if link_complete else 'true' }}">
+    <div class="tour-top"><span class="tour-brand">WOL PRO · PASO A PASO</span><button type="button" data-tour-close aria-label="Cerrar el tour">×</button></div>
+    <div class="tour-content">
+    <div class="tour-progress" aria-live="polite"></div>
+    <progress class="tour-meter" value="1" max="9" aria-label="Progreso del tour"></progress>
+    <h2 id="tour-title"></h2>
+    <p id="tour-description"></p>
+    <div class="tour-example" aria-label="Ejemplo de uso"></div>
+    <p class="tour-note">Puedes recorrerlo sin registrar equipos ni ejecutar órdenes. Vuelve cuando quieras desde «Tour de WoL Pro».</p>
+    <button type="button" class="btn btn-outline-success" data-tour-location>Mostrar sección</button>
+    <button type="button" class="tour-restart" data-tour-restart>Volver al principio</button>
+    </div>
+    <div class="tour-actions"><button type="button" class="btn btn-outline-secondary" data-tour-back>Anterior</button><button type="button" class="btn btn-success" data-tour-next>Siguiente</button></div>
+</dialog>

@@ -11,7 +11,11 @@ jobs:
         with:
           python-version: '3.13'
       - run: pip install -r requirements.txt
-      - run: python -m unittest test_app test_windows_agent test_monetization -q
+      - run: python -m unittest test_native_auth test_app test_windows_agent test_database test_monetization -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node --test test_tour.cjs test_web_ads.cjs
   mariadb:
     runs-on: ubuntu-latest
     services:

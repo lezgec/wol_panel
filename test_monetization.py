@@ -8,12 +8,12 @@ import unittest
 import uuid
 from unittest.mock import patch
 from datetime import datetime, timezone
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote, unquote_to_bytes
 import test_windows_agent as agent_tests
 from windows_agent import AgentError
 from admin_api import totp
 from monetization import DEFAULT_ADS
-from ads_verification import AdMobVerifier
+from ads_verification import AdMobVerifier, CONSOLE_CHECK
 
 
 class MonetizationTests(unittest.TestCase):
@@ -124,17 +124,87 @@ class MonetizationTests(unittest.TestCase):
         self.assertTrue(self.plans.public(2)['ads']['enabled'])
         with self.assertRaises(AgentError): self.plans.verified_reward('other-ticket','verified-transaction')
 
-    def test_interstitial_frequency_and_daily_cap_are_server_side(self):
+    def test_ads_test_scope_covers_all_app_formats_and_preserves_entitlements(self):
+        with patch.dict(os.environ, ADS_TEST_USER_IDS='1'):
+            self.assertFalse(self.plans.public(1)['ads']['enabled'])
+            self.ads()
+            policy = self.plans.public(1)['ads']
+            self.assertTrue(policy['enabled']); self.assertTrue(policy['rewarded'])
+            self.assertTrue(policy['banner']); self.assertTrue(policy['interstitial']); self.assertFalse(policy['web'])
+            self.assertFalse(self.plans.public(2)['ads']['enabled'])
+            for user_id, kind in ((2, 'rewarded'), (2, 'interstitial')):
+                with self.assertRaises(AgentError) as error: self.plans.ad_ticket(user_id, kind)
+                self.assertEqual(error.exception.code, 'ads_disabled')
+            self.plans.ad_ticket(1, 'interstitial')
+            with self.plans.state() as db:
+                db.execute("UPDATE plan_config SET value=? WHERE key='ads'", (json.dumps({**DEFAULT_ADS, 'enabled': True, 'banner': False, 'interstitial': False}),))
+            self.assertFalse(self.plans.public(1)['ads']['banner'])
+            with self.assertRaises(AgentError): self.plans.ad_ticket(1, 'interstitial')
+            self.premium()
+            self.assertFalse(self.plans.public(1)['ads']['enabled'])
+            with self.assertRaises(AgentError): self.plans.ad_ticket(1, 'rewarded')
+            self.clear_premium()
+            ticket = self.plans.ad_ticket(1, 'rewarded')['ticket']
+            self.plans.verified_reward(ticket, 'test-scope-signed-reward')
+            account = self.plans.public(1)
+            self.assertEqual(account['tier'], 'free')
+            self.assertAlmostEqual(account['ad_free_until']-time.time(), 1800, delta=2)
+            self.assertFalse(account['ads']['enabled'])
+
+    def test_invalid_ads_test_scope_fails_closed(self):
         self.ads()
-        self.plans.ad_ticket(1,'interstitial')
-        with self.assertRaises(AgentError) as failure: self.plans.ad_ticket(1,'interstitial')
-        self.assertEqual(failure.exception.code,'ad_frequency')
-        with self.plans.state() as db: db.execute('UPDATE ad_tickets SET created=created-601')
-        self.plans.ad_ticket(1,'interstitial')
-        with self.plans.state() as db: db.execute('UPDATE ad_tickets SET created=created-601')
-        self.plans.ad_ticket(1,'interstitial')
-        with self.plans.state() as db: db.execute('UPDATE ad_tickets SET created=created-601')
-        with self.assertRaises(AgentError): self.plans.ad_ticket(1,'interstitial')
+        for scope in ('1,', '1,all', '0', '-1', '١'):
+            with self.subTest(scope=scope), patch.dict(os.environ, ADS_TEST_USER_IDS=scope):
+                self.assertFalse(self.plans.public(1)['ads']['enabled'])
+                with self.assertRaises(AgentError): self.plans.ad_ticket(1, 'rewarded')
+
+    def test_web_readiness_scope_and_pause_are_independent_of_android_test_scope(self):
+        self.ads()
+        with patch.dict(os.environ, ADS_WEB_READY='0', ADS_WEB_TEST_USER_IDS='', ADS_TEST_USER_IDS='1'):
+            self.assertFalse(self.plans.public(1)['ads']['web'])
+        with patch.dict(os.environ, ADS_WEB_READY='1', ADS_WEB_TEST_USER_IDS='2', ADS_TEST_USER_IDS='1'):
+            self.assertTrue(self.plans.public(1)['ads']['enabled'])
+            self.assertFalse(self.plans.public(1)['ads']['web'])
+            self.assertFalse(self.plans.public(2)['ads']['enabled'])
+            self.assertTrue(self.plans.public(2)['ads']['web'])
+            with self.assertRaises(AgentError): self.plans.ad_ticket(2, 'rewarded')
+        with patch.dict(os.environ, ADS_WEB_READY='1', ADS_WEB_TEST_USER_IDS='1', ADS_TEST_USER_IDS='1'):
+            self.assertTrue(self.plans.public(1)['ads']['web'])
+            self.premium()
+            self.assertFalse(self.plans.public(1)['ads']['web'])
+            self.clear_premium()
+            ticket = self.plans.ad_ticket(1, 'rewarded')['ticket']
+            self.plans.verified_reward(ticket, 'web-pause-verified')
+            self.assertFalse(self.plans.public(1)['ads']['web'])
+
+    def test_invalid_web_scope_and_disabled_admin_policy_block_web(self):
+        self.ads()
+        with patch.dict(os.environ, ADS_WEB_READY='1'):
+            for scope in ('1,', '1,all', '0', '-1', '١'):
+                with self.subTest(scope=scope), patch.dict(os.environ, ADS_WEB_TEST_USER_IDS=scope):
+                    self.assertFalse(self.plans.public(1)['ads']['web'])
+            with patch.dict(os.environ, ADS_WEB_TEST_USER_IDS='1'):
+                with self.plans.state() as db:
+                    db.execute("UPDATE plan_config SET value=? WHERE key='ads'", (json.dumps({**DEFAULT_ADS, 'enabled': True, 'web': False}),))
+                self.assertFalse(self.plans.public(1)['ads']['web'])
+                with self.plans.state() as db:
+                    db.execute("UPDATE plan_config SET value=? WHERE key='ads'", (json.dumps({**DEFAULT_ADS, 'enabled': False, 'web': True}),))
+                self.assertFalse(self.plans.public(1)['ads']['web'])
+
+    def test_interstitial_frequency_and_daily_cap_are_server_side(self):
+        # Keep simulated impressions in one UTC day, even near midnight.
+        noon=(int(time.time())//86400)*86400+43200
+        with patch('monetization.time.time',return_value=noon):
+            self.ads()
+            self.plans.ad_ticket(1,'interstitial')
+            with self.assertRaises(AgentError) as failure: self.plans.ad_ticket(1,'interstitial')
+            self.assertEqual(failure.exception.code,'ad_frequency')
+            with self.plans.state() as db: db.execute('UPDATE ad_tickets SET created=created-601')
+            self.plans.ad_ticket(1,'interstitial')
+            with self.plans.state() as db: db.execute('UPDATE ad_tickets SET created=created-601')
+            self.plans.ad_ticket(1,'interstitial')
+            with self.plans.state() as db: db.execute('UPDATE ad_tickets SET created=created-601')
+            with self.assertRaises(AgentError): self.plans.ad_ticket(1,'interstitial')
 
     def test_admob_signature_over_raw_query_rejects_tampering(self):
         from cryptography.hazmat.primitives.asymmetric import ec
@@ -152,11 +222,113 @@ class MonetizationTests(unittest.TestCase):
             with self.subTest(unit=unit),patch.dict(os.environ,ADMOB_REWARDED_UNIT=unit):
                 with self.assertRaises(AgentError): verifier.verify(query)
 
+    def test_signed_console_check_never_grants_reward_and_normal_tickets_still_work(self):
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.hazmat.primitives import hashes
+        private=ec.generate_private_key(ec.SECP256R1())
+        verifier=self.app.admob_verifier
+
+        def query(ticket=CONSOLE_CHECK,unit='3375316331',timestamp=None):
+            raw=urlencode(dict(ad_unit=unit,timestamp=timestamp or int(time.time()*1000),
+                               custom_data=ticket,reward_item='minutos sin anuncios',
+                               transaction_id='console-test-transaction'),quote_via=quote).encode()
+            signature=base64.urlsafe_b64encode(private.sign(unquote_to_bytes(raw),ec.ECDSA(hashes.SHA256()))).rstrip(b'=')
+            return (raw+b'&signature='+signature+b'&key_id=7').decode()
+
+        with patch.dict(os.environ,ADMOB_REWARDED_UNIT='ca-app-pub-8703217786138724/3375316331'), \
+             patch.object(verifier,'keys',{7:private.public_key()}), \
+             patch.object(verifier,'updated',time.time()), \
+             patch.object(self.plans,'verified_reward',wraps=self.plans.verified_reward) as reward:
+            before=self.plans.public(1)
+            signed=query()
+            console_signed=query(unit='1234567890')
+            for diagnostic in (signed,console_signed):
+                for _ in range(2):
+                    response=self.client.get('/api/ads/ssv?'+diagnostic)
+                    self.assertEqual(response.status_code,200)
+                    self.assertEqual(response.json,dict(status='verified',diagnostic=True,reward_granted=False))
+            reward.assert_not_called()
+            self.assertEqual(self.plans.public(1),before)
+            for invalid in ('custom_data='+CONSOLE_CHECK,
+                            signed.replace(CONSOLE_CHECK,'tampered'),
+                            console_signed.replace(CONSOLE_CHECK,'tampered'),
+                            console_signed.replace('console-test-transaction','forged-transaction'),
+                            console_signed.replace('key_id=7','key_id=8'),
+                            query(ticket='unknown-ticket',unit='1234567890'),
+                            query(unit='9595083634'),
+                            query(unit='1234567891'),
+                            query(timestamp=int((time.time()-600.02)*1000)),
+                            query(timestamp=int((time.time()-601)*1000)),
+                            query(unit='1234567890',timestamp=int((time.time()-601)*1000))):
+                self.assertEqual(self.client.get('/api/ads/ssv?'+invalid).status_code,403)
+            reward.assert_not_called()
+            self.assertEqual(self.client.get('/api/ads/ssv?'+query(ticket='unknown-ticket')).status_code,400)
+            self.assertEqual(self.plans.public(1),before)
+            self.ads()
+            ticket=self.plans.ad_ticket(1,'rewarded')['ticket']
+            self.assertEqual(self.client.get('/api/ads/ssv?'+query(ticket=ticket,unit='1234567890')).status_code,403)
+            self.assertEqual(self.plans.public(1)['tier'],'free')
+            self.assertEqual(self.plans.public(1)['ad_free_until'],before['ad_free_until'])
+            self.assertEqual(self.client.get('/api/ads/ssv?'+query(ticket=ticket)).status_code,200)
+            self.assertAlmostEqual(self.plans.public(1)['ad_free_until']-time.time(),1800,delta=2)
+            self.assertEqual(self.plans.public(1)['tier'],'free')
+
+    def test_ssv_uri_decoding_preserves_signed_order_plus_and_rejects_tampering(self):
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.hazmat.primitives import hashes
+        private=ec.generate_private_key(ec.SECP256R1())
+        verifier=AdMobVerifier(); verifier.keys={7:private.public_key()}; verifier.updated=time.time()
+
+        def signed(raw,escape_signature=False):
+            signature=base64.urlsafe_b64encode(private.sign(unquote_to_bytes(raw),ec.ECDSA(hashes.SHA256())))
+            if escape_signature: signature=signature.replace(b'=',b'%3D')
+            return raw+b'&signature='+signature+b'&key_id=7'
+
+        with patch.dict(os.environ,ADMOB_REWARDED_UNIT='3375316331'):
+            for item in ('30 minutos sin anuncios','crédito + 30 minutos','literal%20'):
+                raw=urlencode(dict(ad_unit='3375316331',custom_data='ticket',reward_item=item,
+                                   timestamp=int(time.time()*1000),transaction_id='transaction'),quote_via=quote).encode()
+                for escape in (False,True):
+                    with self.subTest(item=item,escape_signature=escape):
+                        query=signed(raw,escape)
+                        self.assertEqual(verifier.verify(query),('ticket','transaction'))
+                        with self.assertRaises(AgentError): verifier.verify(query.replace(b'ticket',b'forged'))
+                        with self.assertRaises(AgentError): verifier.verify(query.replace(b'reward_item=',b'reward_item=changed'))
+                if b'%2B' in raw:
+                    self.assertEqual(verifier.verify(signed(raw.replace(b'%2B',b'+'))),('ticket','transaction'))
+            for item in ('bad%escape','one&custom_data=forged'):
+                raw=urlencode(dict(ad_unit='3375316331',custom_data='ticket',reward_item='placeholder',
+                                   timestamp=int(time.time()*1000),transaction_id='transaction')).encode()
+                replacement=item.encode() if '%' in item else quote(item).encode()
+                with self.assertRaises(AgentError): verifier.verify(signed(raw.replace(b'placeholder',replacement)))
+
     def test_client_cannot_grant_reward_or_premium_with_a_flag(self):
         headers=self.headers()
         self.assertEqual(self.client.post('/api/ads/ssv',headers=headers,json={'rewarded':True}).status_code,405)
         self.assertEqual(self.client.post('/api/mobile/v1/plan/purchase',headers=headers,json={'premium':True}).status_code,400)
         self.assertEqual(self.plans.snapshot(1)['tier'],'free')
+
+    def test_ssv_rejection_log_identifies_stage_without_receipt_or_user_data(self):
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.hazmat.primitives import hashes
+        private=ec.generate_private_key(ec.SECP256R1())
+        verifier=AdMobVerifier(); verifier.keys={7:private.public_key()}; verifier.updated=time.time()
+        raw=urlencode(dict(ad_unit='3375316331',timestamp=int(time.time()*1000),
+                           custom_data='secret-ticket',transaction_id='secret-transaction',
+                           user_id='private@example.invalid')).encode()
+        signature=base64.urlsafe_b64encode(private.sign(raw,ec.ECDSA(hashes.SHA256()))).rstrip(b'=')
+        query=raw+b'&signature='+signature+b'&key_id=7'
+        cases=[(query.replace(b'secret-ticket',b'changed-ticket'),'signature'),
+               (query.replace(b'3375316331',b'9595083634'),'ad_unit'),
+               (b'custom_data=secret-ticket','query_structure')]
+        with patch.dict(os.environ,ADMOB_REWARDED_UNIT='3375316331'):
+            for rejected,stage in cases:
+                with self.subTest(stage=stage),self.assertLogs('ads_verification',level='WARNING') as logs:
+                    with self.assertRaises(AgentError): verifier.verify(rejected)
+                message=' '.join(logs.output)
+                self.assertIn('stage='+stage,message)
+                for sensitive in ('secret-ticket','changed-ticket','secret-transaction','private',signature.decode()):
+                    self.assertNotIn(sensitive,message)
 
     def receipt(self,state='SUBSCRIPTION_STATE_ACTIVE'):
         return dict(subscriptionState=state,acknowledgementState='ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',externalAccountIdentifiers={'obfuscatedExternalAccountId':self.app.billing.account_id(1)},lineItems=[dict(productId='premium',expiryTime=datetime.fromtimestamp(time.time()+3600,timezone.utc).isoformat(),autoRenewingPlan={'autoRenewEnabled':True})])
